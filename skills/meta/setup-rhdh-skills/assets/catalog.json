@@ -191,6 +191,13 @@
       "requiresExternalSkills": []
     },
     {
+      "name": "rhdh-playwright",
+      "category": "plugins",
+      "invocation": "model",
+      "requiresSkills": [],
+      "requiresExternalSkills": []
+    },
+    {
       "name": "rhdh-pr-create",
       "category": "plugins",
       "invocation": "model",

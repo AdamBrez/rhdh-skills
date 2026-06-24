@@ -98,6 +98,7 @@
         "./skills/plugins/rhdh-plugin-midstream-propagate",
         "./skills/plugins/rhdh-plugin-nfs-migration",
         "./skills/plugins/rhdh-plugin-wiring",
+        "./skills/plugins/rhdh-playwright",
         "./skills/plugins/rhdh-pr-create",
         "./skills/plugins/rhdh-pr-review",
         "./skills/plugins/rhdh-test-placement"
