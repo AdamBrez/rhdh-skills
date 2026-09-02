@@ -1,0 +1,51 @@
+# SoS report template
+
+The CLI fills this template exactly. Do not add sections, reorder headings, or
+improvise prose around it.
+
+```markdown
+# RHDH {{VERSION}} — SoS Release Check-in
+
+| | |
+|---|---|
+| As of | {{AS_OF}} |
+| Release phase | {{ACTIVE_SECTION}} |
+| Next milestone | {{NEXT_MILESTONE}} |
+
+## Milestones
+
+| Milestone | Date | Days remaining |
+|---|---|---:|
+| Feature Freeze | {{FF_DATE}} | {{FF_DAYS}} |
+| Code Freeze | {{CF_DATE}} | {{CF_DAYS}} |
+| Go/No Go | {{GNG_DATE}} | {{GNG_DAYS}} |
+| GA Announce | {{GA_DATE}} | {{GA_DAYS}} |
+
+## Checks
+
+| Check | Summary | Jira |
+|---|---|---|
+{{CHECK_ROWS}}
+```
+
+Each `{{CHECK_ROW}}` is one due check followed by its team sub-rows:
+
+```markdown
+| {{CHECK_TITLE}} | {{CHECK_SUMMARY}} | [Open in Jira]({{JIRA_URL}}) |
+| ↳ {{TEAM_NAME}} | {{TEAM_SUMMARY}} | [Open in Jira]({{TEAM_JIRA_URL}}) |
+```
+
+Team sub-rows use engineering teams from the RHDH Team Mapping spreadsheet with a
+Jira Cloud ID. The team filter is the same check query plus
+`"Team[Team]" = "<cloud_id>"`. Omit teams without a Cloud ID.
+
+When no checks are due:
+
+```markdown
+| _No checks due today._ | | |
+```
+
+Summary values are only: `None open`, `1 open`, `N open`, or `Unverified`.
+
+Present `report_markdown` from the CLI without editing. Do not append runbook
+metadata, upcoming checks, follow-up bullet lists, or a separate narrative summary.
