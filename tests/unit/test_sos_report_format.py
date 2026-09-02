@@ -113,3 +113,13 @@ class TestReportFormat:
         assert enriched["results"][0]["summary"] == "157 open"
         assert "executive_summary" not in enriched
         assert "[Open in Jira]" in enriched["report_markdown"]
+        assert enriched["report_html"].startswith("<!DOCTYPE html>")
+        assert "RHDH 2.1.0 — SoS Release Check-in" in enriched["report_html"]
+        assert 'class="summary summary-open"' in enriched["report_html"]
+        assert 'class="team-row"' in enriched["report_html"]
+        assert "<style>" in enriched["report_html"]
+
+    def test_summary_css_class(self):
+        assert format_mod.summary_css_class({"status": "ok", "count": 0}) == "summary-none"
+        assert format_mod.summary_css_class({"status": "ok", "count": 3}) == "summary-open"
+        assert format_mod.summary_css_class({"status": "unverified"}) == "summary-unverified"

@@ -26,13 +26,20 @@ reads active-release milestone dates from Jira directly.
 
 ## Step 3: Run the check-in CLI
 
+Run from this skill directory. Always pass `--html-output` so the HTML file lands in
+a known, downloadable location:
+
 ```bash
-uv run scripts/sos_report.py --json run {{VERSION}}
+uv run scripts/sos_report.py --json run {{VERSION}} --html-output reports/rhdh-{{VERSION}}-sos.html
 ```
 
 Use `--date YYYY-MM-DD` only when the user names an as-of date other than today.
-Use `plan` instead of `run` when the user wants due checks listed without Jira
-counts.
+Use `plan` instead of `run` only when the user wants due checks listed without Jira
+counts — `plan` does not produce HTML.
+
+After the command, require `data.report_html_path` in the JSON and confirm the file
+exists on disk before presenting the report. If it is missing, stop and diagnose; do
+not show a report without a written HTML file.
 
 The cumulative rule is implemented in the CLI: within the active milestone section,
 every check whose resolved date is on or before today runs. See
@@ -43,6 +50,12 @@ every check whose resolved date is on or before today runs. See
 Show `report_markdown` exactly as the CLI returns it. The fixed layout is defined
 in `references/report-template.md`. Do not add upcoming checks, follow-up lists,
 runbook execution counts, or extra narrative around the template.
+
+Tell the user where the HTML file was written (`report_html_path`). Give the absolute
+path so they can open, attach, or publish it. The CLI also prints
+`SOS_HTML_REPORT=<path>` on stderr. See `references/report-template-html.md`.
+
+Do not treat the run as complete unless `report_html_path` exists on disk.
 
 </process>
 
@@ -59,6 +72,7 @@ runbook execution counts, or extra narrative around the template.
 <success_criteria>
 
 - [ ] `report_markdown` is shown unchanged from the CLI
+- [ ] `report_html_path` exists on disk and was shared with the user
 - [ ] Every due check row has a summary and `[Open in Jira](url)` link
 - [ ] Every due check includes team sub-rows with summary and Jira link where Cloud ID exists
 - [ ] No upcoming-checks section and no runbook execution metadata were added

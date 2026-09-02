@@ -27,5 +27,10 @@ Use the CLI `results[].summary` value only:
 
 ## Completion
 
-Show `report_markdown` exactly as returned. Every due check row must keep its Jira
-link from the CLI.
+Show `report_markdown` exactly as returned in the conversation. Every due check row
+must keep its Jira link from the CLI.
+
+Also give the user the absolute `report_html_path` from the CLI JSON so they can
+download or publish the self-contained HTML page. The file must exist on disk before
+the run is complete. Do not paste `report_html` into chat unless the user explicitly
+asks for the source.

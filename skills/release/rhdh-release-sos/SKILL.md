@@ -35,7 +35,7 @@ Query execution reuses the `/rhdh-release-status` scripts through
 
 ## Completion
 
-Complete when the user receives `report_markdown` from the CLI unchanged: metadata
-table, milestone table, and one Checks row per due check with summary and Jira link,
-plus a team sub-row under each check with per-team summary and Jira link.
-Nothing was posted to Slack or Jira.
+Complete when the user receives `report_markdown` from the CLI unchanged in chat,
+and a self-contained HTML file exists at `report_html_path` (written by every
+`run`, not `plan`): metadata table, milestone table, Checks rows, and team
+sub-rows as in the markdown report. Nothing was posted to Slack or Jira.

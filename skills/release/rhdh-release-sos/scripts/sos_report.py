@@ -15,6 +15,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 _scripts_dir = Path(__file__).resolve().parent
+_skill_root = _scripts_dir.parent
 if str(_scripts_dir) not in sys.path:
     sys.path.insert(0, str(_scripts_dir))
 
@@ -160,7 +161,20 @@ def _milestone_summary(milestones: dict[str, str], as_of: date) -> list[dict]:
     return rows
 
 
-def build_report(version: str, *, as_of: date | None = None, execute: bool = True) -> dict:
+def reports_dir() -> Path:
+    """Persistent directory for generated HTML reports."""
+    directory = _skill_root / "reports"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def build_report(
+    version: str,
+    *,
+    as_of: date | None = None,
+    execute: bool = True,
+    html_output: str | Path | None = None,
+) -> dict:
     as_of = as_of or _today(None)
     jql_mod, release_mod, rf_mod = bridge_mod.import_release_modules()
     from _support import OutputFormatter  # noqa: PLC0415
@@ -180,7 +194,7 @@ def build_report(version: str, *, as_of: date | None = None, execute: bool = Tru
         for row in due:
             executed.append(_run_check(row, version, release_mod, jql_mod, rf_mod, fmt, teams))
 
-    return format_mod.enrich_report(
+    report = format_mod.enrich_report(
         {
             "version": version,
             "as_of": as_of.isoformat(),
@@ -210,6 +224,36 @@ def build_report(version: str, *, as_of: date | None = None, execute: bool = Tru
             "results": executed,
         }
     )
+    if execute:
+        output = Path(html_output).expanduser() if html_output else None
+        attach_html_artifact(report, output)
+    return report
+
+
+def default_html_path(version: str, as_of: str) -> Path:
+    """Default download path for a self-contained HTML report."""
+    safe_version = version.replace("/", "-")
+    return reports_dir() / f"rhdh-{safe_version}-sos-{as_of}.html"
+
+
+def write_report_html(report: dict, output: Path | None = None) -> Path:
+    """Write report_html to disk and return the path."""
+    if "report_html" not in report:
+        raise ValueError("report_html missing; enrich the report before writing HTML")
+    path = output or default_html_path(report["version"], report["as_of"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(report["report_html"], encoding="utf-8")
+    resolved = path.resolve()
+    if not resolved.is_file():
+        raise RuntimeError(f"HTML report was not written: {resolved}")
+    return resolved
+
+
+def attach_html_artifact(report: dict, output: Path | None = None) -> dict:
+    """Write the HTML report and attach report_html_path to the report dict."""
+    path = write_report_html(report, output)
+    report["report_html_path"] = str(path)
+    return report
 
 
 def cmd_check(_args: argparse.Namespace) -> None:
@@ -227,11 +271,20 @@ def cmd_plan(args: argparse.Namespace) -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    report = build_report(args.version, as_of=_today(args.date), execute=True)
+    report = build_report(
+        args.version,
+        as_of=_today(args.date),
+        execute=True,
+        html_output=args.html_output,
+    )
+    html_path = report["report_html_path"]
     print(json.dumps({"success": True, "data": report}, indent=2))
+    print(f"SOS_HTML_REPORT={html_path}", file=sys.stderr)
     if not args.json:
         print()
         print(report["report_markdown"])
+        print()
+        print(f"HTML report: {html_path}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -248,6 +301,10 @@ def main(argv: list[str] | None = None) -> None:
     run = sub.add_parser("run", help="Run due checks and return counts")
     run.add_argument("version", help="Release version, e.g. 2.1.0")
     run.add_argument("--date", help="As-of date (YYYY-MM-DD); default is today")
+    run.add_argument(
+        "--html-output",
+        help="Write self-contained HTML report to this path (default: temp directory)",
+    )
 
     args = parser.parse_args(argv)
     handlers = {"check": cmd_check, "plan": cmd_plan, "run": cmd_run}
