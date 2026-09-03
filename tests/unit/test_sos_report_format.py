@@ -116,10 +116,156 @@ class TestReportFormat:
         assert enriched["report_html"].startswith("<!DOCTYPE html>")
         assert "RHDH 2.1.0 — SoS Release Check-in" in enriched["report_html"]
         assert 'class="summary summary-open"' in enriched["report_html"]
-        assert 'class="team-row"' in enriched["report_html"]
+        assert 'class="check-row"' in enriched["report_html"]
+        assert '<details class="team-breakdown">' in enriched["report_html"]
+        assert '<details class="team-breakdown" open>' not in enriched["report_html"]
+        assert 'class="team-table"' in enriched["report_html"]
         assert "<style>" in enriched["report_html"]
 
     def test_summary_css_class(self):
         assert format_mod.summary_css_class({"status": "ok", "count": 0}) == "summary-none"
         assert format_mod.summary_css_class({"status": "ok", "count": 3}) == "summary-open"
         assert format_mod.summary_css_class({"status": "unverified"}) == "summary-unverified"
+        assert (
+            format_mod.summary_css_class(
+                {"kind": "ratio", "status": "ok", "numerator": 12, "denominator": 18, "percent": 67}
+            )
+            == "summary-open"
+        )
+        assert (
+            format_mod.summary_css_class(
+                {"kind": "ratio", "status": "ok", "numerator": 4, "denominator": 4, "percent": 100}
+            )
+            == "summary-none"
+        )
+        assert (
+            format_mod.summary_css_class(
+                {
+                    "kind": "expect_assignee",
+                    "status": "ok",
+                    "expect_state": "assigned",
+                }
+            )
+            == "summary-none"
+        )
+        assert (
+            format_mod.summary_css_class(
+                {
+                    "kind": "expect_assignee",
+                    "status": "ok",
+                    "expect_state": "unassigned",
+                }
+            )
+            == "summary-open"
+        )
+
+    def test_expect_assignee_summary_and_links(self):
+        assigned = {
+            "kind": "expect_assignee",
+            "status": "ok",
+            "summary": "Assigned (RHIDP-9)",
+            "expect_state": "assigned",
+            "issue_key": "RHIDP-9",
+            "issue_url": "https://redhat.atlassian.net/browse/RHIDP-9",
+            "jira_url": "https://redhat.atlassian.net/browse/RHIDP-9",
+            "teams": [],
+        }
+        assert format_mod.check_summary(assigned) == "Assigned (RHIDP-9)"
+        report = {**SAMPLE_REPORT, "results": [{**assigned, "title": "Test Day ticket has owner"}]}
+        markdown = format_mod.render_report_markdown(report)
+        assert "[RHIDP-9](https://redhat.atlassian.net/browse/RHIDP-9)" in markdown
+        html = format_mod.render_report_html(report)
+        assert 'class="summary summary-none"' in html
+        assert ">RHIDP-9</a>" in html
+
+    def test_ratio_check_summary(self):
+        result = {
+            "kind": "ratio",
+            "status": "ok",
+            "numerator": 12,
+            "denominator": 18,
+            "percent": 67,
+        }
+        assert format_mod.check_summary(result) == "67% (12/18)"
+        assert (
+            format_mod.check_summary({"kind": "ratio", "status": "ok", "denominator": 0}) == "None"
+        )
+
+    def test_due_static_markdown_in_checks_table(self):
+        report = {
+            **SAMPLE_REPORT,
+            "results": [
+                {
+                    "title": "FF work remaining for Feature Freeze",
+                    "kind": "due",
+                    "due_by_date": "2026-09-22",
+                    "count": 2,
+                    "status": "ok",
+                    "jira_url": "https://redhat.atlassian.net/issues/?jql=ff",
+                    "teams": [
+                        {
+                            "team_name": "RHDH COPE",
+                            "count": 1,
+                            "status": "ok",
+                            "jira_url": "https://redhat.atlassian.net/issues/?jql=team",
+                        }
+                    ],
+                }
+            ],
+        }
+        markdown = format_mod.render_report_markdown(report)
+        assert "## Remaining for Feature Freeze" not in markdown
+        assert "FF work remaining for Feature Freeze | 2 open | [Open in Jira]" in markdown
+        assert "| ↳ COPE | 1 open | [Open in Jira]" in markdown
+
+    def test_due_static_html_check_row_only(self):
+        report = {
+            **SAMPLE_REPORT,
+            "results": [
+                {
+                    "title": "FF work remaining for Feature Freeze",
+                    "kind": "due",
+                    "due_by_date": "2026-09-22",
+                    "count": 1,
+                    "status": "ok",
+                    "jira_url": "https://redhat.atlassian.net/issues/?jql=ff",
+                    "teams": [
+                        {
+                            "team_name": "RHDH COPE",
+                            "count": 1,
+                            "status": "ok",
+                            "jira_url": "https://redhat.atlassian.net/issues/?jql=team",
+                        }
+                    ],
+                }
+            ],
+        }
+        html = format_mod.render_report_html(report)
+        assert 'class="issue-panel"' not in html
+        assert 'class="issue-table"' not in html
+        assert "Complete by Feature Freeze" in html
+        assert "1 open" in html
+        assert "Open in Jira" in html
+        assert '<details class="team-breakdown">' in html
+        assert "RHIDP-1" not in html
+
+    def test_code_freeze_due_static_html_due_line(self):
+        report = {
+            **SAMPLE_REPORT,
+            "active_section": {"title": "Code Freeze", "milestone_key": "code_freeze"},
+            "results": [
+                {
+                    "title": "CF work remaining for Code Freeze",
+                    "kind": "due",
+                    "due_by_milestone": "Code Freeze",
+                    "due_by_date": "2026-10-13",
+                    "count": 3,
+                    "status": "ok",
+                    "jira_url": "https://redhat.atlassian.net/issues/?jql=cf",
+                    "teams": [],
+                }
+            ],
+        }
+        html = format_mod.render_report_html(report)
+        assert "Complete by Code Freeze · 2026-10-13" in html
+        assert "3 open" in html

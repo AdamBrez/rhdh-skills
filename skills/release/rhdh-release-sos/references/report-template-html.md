@@ -7,8 +7,13 @@ The CLI renders a self-contained HTML page from the same report data as
 
 1. Header — title and metadata (`As of`, `Release phase`, `Next milestone`)
 2. Milestones — table; highlight the active release phase row
-3. Checks — table with check rows and indented team sub-rows
-4. Footer — generation date
+3. Checks — highlighted check rows with summary and Jira link
+4. Team breakdown — collapsed in `<details>` (HTML only)
+5. Footer — generation date
+
+Check rows use bold text and a light background. Issue-list checks show the due date,
+count, and Jira link on the check row only — no ticket tables. Team breakdown stays in a
+native `<details>` block (collapsed by default, no JavaScript).
 
 Summary badges use the same values as markdown: `None open`, `1 open`, `N open`,
 `Unverified`, with color coding (green / amber / gray).

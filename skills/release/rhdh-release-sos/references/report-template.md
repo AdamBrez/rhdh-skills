@@ -45,7 +45,10 @@ When no checks are due:
 | _No checks due today._ | | |
 ```
 
-Summary values are only: `None open`, `1 open`, `N open`, or `Unverified`.
+Summary values are only: `None open`, `1 open`, `N open`, `Unverified`, ratio
+summaries, or expect-assignee summaries (`Assigned (KEY)`, `Unassigned — find an
+owner`, `Not found — create or link ticket`, `Multiple matches (…)`).
 
-Present `report_markdown` from the CLI without editing. Do not append runbook
-metadata, upcoming checks, follow-up bullet lists, or a separate narrative summary.
+Present `report_markdown` from the CLI without editing. Issue-list checks appear in the
+Checks table like count checks, with team sub-rows. Do not append runbook metadata, upcoming checks, follow-up bullet lists, or a
+separate narrative summary.

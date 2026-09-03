@@ -75,3 +75,11 @@ class TestSelectChecks:
         assert section.milestone_key == "code_freeze"
         assert due == []
         assert [row.title for row in upcoming] == ["Blocker bugs"]
+
+    def test_test_day_expect_check_due_during_feature_freeze_section(self):
+        rows = checks_mod.attach_dates(checks_mod.load_checks(), MILESTONES)
+        due, _upcoming, section = checks_mod.select_checks(
+            rows, as_of=date(2026, 9, 4), milestones=MILESTONES
+        )
+        assert section.milestone_key == "feature_freeze"
+        assert "Test Day ticket has owner" in [row.title for row in due]

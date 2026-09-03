@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from html import escape
 
+import sos_metrics as metrics_mod
+
 _MILESTONE_ORDER = [
     ("feature_freeze", "Feature Freeze"),
     ("code_freeze", "Code Freeze"),
@@ -22,6 +24,18 @@ def team_display_name(team_name: str) -> str:
 
 def check_summary(result: dict) -> str:
     """Short summary label for the Checks table."""
+    if result.get("kind") == "expect_assignee":
+        if result.get("status") == "unverified":
+            return "Unverified"
+        return str(result.get("summary", "Unverified"))
+
+    if result.get("kind") == "ratio":
+        return metrics_mod.ratio_summary(
+            result.get("numerator"),
+            result.get("denominator"),
+            status=result.get("status", "ok"),
+        )
+
     if result.get("status") == "unverified":
         return "Unverified"
 
@@ -37,6 +51,17 @@ def summary_css_class(result: dict) -> str:
     """CSS class for a check or team summary badge."""
     if result.get("status") == "unverified":
         return "summary-unverified"
+    if result.get("kind") == "expect_assignee":
+        if result.get("expect_state") == "assigned":
+            return "summary-none"
+        return "summary-open"
+    if result.get("kind") == "ratio":
+        denominator = result.get("denominator")
+        if not denominator:
+            return "summary-none"
+        if result.get("percent") == 100:
+            return "summary-none"
+        return "summary-open"
     count = result.get("count")
     if count == 0:
         return "summary-none"
@@ -60,28 +85,87 @@ def _html_summary_badge(result: dict) -> str:
     return f'<span class="summary {css_class}">{escape(summary)}</span>'
 
 
-def _html_check_rows(results: list[dict]) -> str:
-    if not results:
-        return '<tr><td colspan="3"><em>No checks due today.</em></td></tr>'
+def _html_team_breakdown_block(result: dict) -> str:
+    teams = result.get("teams", [])
+    if not teams:
+        return ""
+    team_count = len(teams)
+    label = "team" if team_count == 1 else "teams"
+    body = f"""
+        <table class="team-table">
+          <thead>
+            <tr>
+              <th>Team</th>
+              <th>Summary</th>
+              <th>Jira</th>
+            </tr>
+          </thead>
+          <tbody>
+            {_html_team_table_rows(teams)}
+          </tbody>
+        </table>"""
+
+    return f"""
+      <details class="team-breakdown">
+        <summary>Team breakdown ({team_count} {label})</summary>
+        {body}
+      </details>"""
+
+
+def _html_check_due_line(result: dict) -> str:
+    if result.get("kind") != "due":
+        return ""
+    due_date = result.get("due_by_date", "TBD")
+    milestone = result.get("due_by_milestone", "Feature Freeze")
+    return f'<div class="check-due">Complete by {escape(milestone)} · {escape(str(due_date))}</div>'
+
+
+def _html_team_table_rows(teams: list[dict]) -> str:
     rows: list[str] = []
-    for result in results:
+    for team in teams:
+        label = team_display_name(team["team_name"])
         rows.append(
             "<tr>"
-            f"<td>{escape(result['title'])}</td>"
-            f"<td>{_html_summary_badge(result)}</td>"
-            f"<td>{_html_jira_link(result.get('jira_url'))}</td>"
+            f"<td>{escape(label)}</td>"
+            f"<td>{_html_summary_badge(team)}</td>"
+            f"<td>{_html_jira_link(team.get('jira_url'))}</td>"
             "</tr>"
         )
-        for team in result.get("teams", []):
-            label = team_display_name(team["team_name"])
-            rows.append(
-                '<tr class="team-row">'
-                f'<td><span class="team-prefix">↳</span> {escape(label)}</td>'
-                f"<td>{_html_summary_badge(team)}</td>"
-                f"<td>{_html_jira_link(team.get('jira_url'))}</td>"
-                "</tr>"
-            )
     return "\n".join(rows)
+
+
+def _html_checks_section(results: list[dict]) -> str:
+    if not results:
+        return '<p class="checks-empty"><em>No checks due today.</em></p>'
+
+    blocks: list[str] = []
+    for result in results:
+        teams = result.get("teams", [])
+        team_markup = _html_team_breakdown_block(result) if teams else ""
+        block_class = "check-block has-teams" if teams else "check-block"
+        jira_link = _html_jira_link(
+            result.get("issue_url") or result.get("jira_url"),
+            label=result.get("issue_key") or "Open in Jira",
+        )
+        blocks.append(
+            f"""
+    <article class="{block_class}">
+      <div class="check-row">
+        <div class="check-title">{escape(result["title"])}{_html_check_due_line(result)}</div>
+        <div class="check-summary">{_html_summary_badge(result)}</div>
+        <div class="check-jira">{jira_link}</div>
+      </div>{team_markup}
+    </article>"""
+        )
+
+    return f"""
+      <div class="checks-head">
+        <div>Check</div>
+        <div>Summary</div>
+        <div>Jira</div>
+      </div>
+      <div class="checks-list">{"".join(blocks)}
+      </div>"""
 
 
 def _html_milestone_rows(report: dict) -> str:
@@ -125,6 +209,8 @@ _HTML_STYLES = """
   --summary-unverified-bg: #eceff1;
   --summary-unverified-text: #455a64;
   --milestone-active-bg: #fff5f5;
+  --check-row-bg: #eef3fb;
+  --check-row-border: #c8d6ef;
 }
 * { box-sizing: border-box; }
 body {
@@ -204,10 +290,93 @@ tr.milestone-active td {
   background: var(--milestone-active-bg);
   font-weight: 600;
 }
-tr.team-row td:first-child {
-  padding-left: 2rem;
+.checks-head,
+.check-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.7fr) minmax(7rem, 0.55fr);
+  gap: 0.75rem;
+  align-items: center;
 }
-.team-prefix {
+.checks-head {
+  padding: 0 0.75rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.checks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.check-block {
+  border: 1px solid var(--check-row-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.check-row {
+  padding: 0.8rem 0.75rem;
+  background: var(--check-row-bg);
+  font-weight: 700;
+}
+.check-title {
+  font-weight: 700;
+  color: var(--text);
+}
+.check-due {
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.team-breakdown {
+  border-top: 1px solid var(--check-row-border);
+  background: #fafbfd;
+}
+.team-breakdown > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: #f6f8fc;
+}
+.team-breakdown > summary::-webkit-details-marker {
+  display: none;
+}
+.team-breakdown > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+}
+.team-breakdown[open] > summary::before {
+  content: "▾";
+}
+.team-breakdown[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+.team-table {
+  width: 100%;
+  margin: 0;
+  font-size: 0.92rem;
+}
+.team-table th,
+.team-table td {
+  padding: 0.55rem 0.75rem;
+}
+.team-table th {
+  background: #f3f5f8;
+}
+.check-summary,
+.check-jira {
+  font-weight: 600;
+}
+.checks-empty {
+  margin: 0;
   color: var(--muted);
 }
 .summary {
@@ -247,6 +416,8 @@ footer {
   body { background: white; padding: 0; }
   .page { box-shadow: none; border: none; }
   .jira-link { color: inherit; text-decoration: underline; }
+  .team-breakdown > summary { display: none; }
+  .team-breakdown .team-table { display: table; }
 }
 """
 
@@ -294,18 +465,7 @@ def render_report_html(report: dict) -> str:
     </section>
     <section>
       <h2>Checks</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Check</th>
-            <th>Summary</th>
-            <th>Jira</th>
-          </tr>
-        </thead>
-        <tbody>
-          {_html_check_rows(report.get("results", []))}
-        </tbody>
-      </table>
+      {_html_checks_section(report.get("results", []))}
     </section>
     <footer>Generated {as_of} · RHDH release SoS check-in</footer>
   </main>
@@ -347,14 +507,21 @@ def _jira_cell(link: str | None) -> str:
     return f"[Open in Jira]({link})" if link else "—"
 
 
+def _result_jira_cell(result: dict) -> str:
+    key = result.get("issue_key")
+    url = result.get("issue_url") or result.get("jira_url")
+    if key and url:
+        return f"[{key}]({url})"
+    return _jira_cell(url)
+
+
 def _check_rows(results: list[dict]) -> str:
     if not results:
         return "| _No checks due today._ | | |"
     lines = []
     for result in results:
         lines.append(
-            f"| {result['title']} | {check_summary(result)} | "
-            f"{_jira_cell(result.get('jira_url'))} |"
+            f"| {result['title']} | {check_summary(result)} | {_result_jira_cell(result)} |"
         )
         for team in result.get("teams", []):
             label = team_display_name(team["team_name"])
@@ -392,8 +559,7 @@ def render_report_markdown(report: dict) -> str:
 
 | Check | Summary | Jira |
 |---|---|---|
-{_check_rows(report.get("results", []))}
-"""
+{_check_rows(report.get("results", []))}"""
 
 
 def enrich_report(report: dict) -> dict:

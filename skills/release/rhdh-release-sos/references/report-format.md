@@ -24,6 +24,12 @@ Use the CLI `results[].summary` value only:
 | `1 open` | Count is 1 |
 | `N open` | Count is greater than 1 |
 | `Unverified` | Jira count failed |
+| `None` | Ratio check with zero Epics in scope |
+| `N% (numerator/denominator)` | Epic Dev Complete ratio |
+| `Assigned (KEY)` | Expect assignee — one match with an owner |
+| `Unassigned — find an owner` | Expect assignee — match exists, no assignee |
+| `Not found — create or link ticket` | Expect assignee — no matching open issue |
+| `Multiple matches (…)` | Expect assignee — pattern matched more than one issue |
 
 ## Completion
 
