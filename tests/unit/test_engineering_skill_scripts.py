@@ -57,3 +57,31 @@ def test_overlay_analyzers_preserve_workspace_and_priority_classification():
     assert analyze.classify_priority(labels)[0] == "critical"
     assert triage.classify_priority(labels)[0] == "critical"
     assert triage.extract_workspace_from_title("Update catalog workspace to 1.2.3") == "catalog"
+
+
+def test_shared_adf_parser_keeps_the_current_milestone_date():
+    from datetime import datetime
+
+    milestones = load_script(
+        "skills/reference/rhdh-jira-api/scripts/adf_milestones.py",
+        "rhdh_shared_adf_natural_dates",
+    )
+    description = {
+        "type": "tableRow",
+        "content": [
+            {"type": "tableCell", "content": [{"type": "text", "text": "Code Freeze"}]},
+            {
+                "type": "tableCell",
+                "content": [
+                    {"type": "text", "text": "August "},
+                    {"type": "text", "text": "27", "marks": [{"type": "strike"}]},
+                    {"type": "text", "text": "31 (done)"},
+                ],
+            },
+        ],
+    }
+    dates = milestones.extract_milestone_dates(description)
+    assert dates["code_freeze"] == f"{datetime.now().year}-08-31"
+    assert dates["feature_freeze"] == "TBD"
+    assert milestones.parse_natural_date("Sep 2, 2025") == "2025-09-02"
+    assert milestones.parse_natural_date("TBD") is None
