@@ -50,7 +50,7 @@ SAMPLE_REPORT = {
     ],
     "results": [
         {
-            "title": "FF Epics, Stories, Tasks not in a sprint",
+            "title": "FF Stories, Tasks not in a sprint",
             "count": 157,
             "status": "ok",
             "jira_url": "https://redhat.atlassian.net/issues/?jql=sprint+is+EMPTY",

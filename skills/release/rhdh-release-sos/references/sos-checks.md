@@ -96,7 +96,7 @@ Add more checks by adding rows with different patterns.
 | When | Check | Query |
 |------|-------|-------|
 | Feature Freeze | | |
-| FF - 21d | FF Epics, Stories, Tasks not in a sprint | static "Feature Freeze" + sprint is EMPTY |
+| FF - 21d | FF Stories, Tasks not in a sprint | static "Feature Freeze" + sprint is EMPTY AND issuetype in (Story, Task) |
 | FF - 21d | FF Epics, Stories, Tasks in New, To Do, or Backlog | static "Feature Freeze" + status in (New, "To Do", Backlog) |
 | FF - 21d | FF Epics Dev Complete | metric epic_dev_complete static "Feature Freeze" |
 | FF - 21d | Work remaining for Feature Freeze | due static "Feature Freeze" |
