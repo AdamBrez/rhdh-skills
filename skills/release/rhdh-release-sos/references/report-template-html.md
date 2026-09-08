@@ -27,11 +27,10 @@ Summary badges use the same values as markdown: `None open`, `1 open`, `N open`,
 - `report_html_path` — absolute path to the written file for download or publishing
 
 Default file name when `--html-output` is omitted:
-`reports/rhdh-{version}-sos-{as-of}.html` under this skill directory.
+`reports/rhdh-{version}-sos-{as-of}-{HHMMSS}.html` under this skill directory.
 
-The workflow passes `--html-output reports/rhdh-{version}-sos.html` so the path is
-stable and easy to find. Override `--html-output` when the user wants the file
-somewhere else.
+When `--html-output` names a path such as `reports/rhdh-{version}-sos.html`, the CLI
+appends `{as-of}-{HHMMSS}` before `.html` so each run gets a unique timestamped file.
 
 The CLI prints `SOS_HTML_REPORT=<path>` on stderr even with `--json`.
 

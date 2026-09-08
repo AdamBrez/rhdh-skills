@@ -33,6 +33,10 @@ a known, downloadable location:
 uv run scripts/sos_report.py --json run {{VERSION}} --html-output reports/rhdh-{{VERSION}}-sos.html
 ```
 
+The CLI appends the report as-of date and generation time to the file name, for example
+`reports/rhdh-2.1.0-sos-2026-09-08-132205.html`. Omit `--html-output` to use the same
+pattern under `reports/` in this skill directory.
+
 Use `--date YYYY-MM-DD` only when the user names an as-of date other than today.
 Use `plan` instead of `run` only when the user wants due checks listed without Jira
 counts — `plan` does not produce HTML.

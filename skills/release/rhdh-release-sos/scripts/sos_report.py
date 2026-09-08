@@ -574,17 +574,54 @@ def build_report(
     return report
 
 
-def default_html_path(version: str, as_of: str) -> Path:
-    """Default download path for a self-contained HTML report."""
+def html_filename_stamp(as_of: str, generated_at: datetime | None = None) -> str:
+    """Build a filesystem-safe date-time suffix for HTML report names."""
+    when = generated_at or datetime.now(timezone.utc)
+    return f"{as_of}-{when.strftime('%H%M%S')}"
+
+
+def resolve_html_output_path(
+    output: Path | None,
+    *,
+    version: str,
+    as_of: str,
+    generated_at: datetime | None = None,
+) -> Path:
+    """Return the HTML output path, adding an as-of date and time suffix when needed."""
+    stamp = html_filename_stamp(as_of, generated_at)
     safe_version = version.replace("/", "-")
-    return reports_dir() / f"rhdh-{safe_version}-sos-{as_of}.html"
+    if output is None:
+        return reports_dir() / f"rhdh-{safe_version}-sos-{stamp}.html"
+
+    suffix = output.suffix or ".html"
+    if output.stem.endswith(stamp):
+        return output
+    return output.with_name(f"{output.stem}-{stamp}{suffix}")
+
+
+def default_html_path(
+    version: str,
+    as_of: str,
+    generated_at: datetime | None = None,
+) -> Path:
+    """Default download path for a self-contained HTML report."""
+    return resolve_html_output_path(
+        None,
+        version=version,
+        as_of=as_of,
+        generated_at=generated_at,
+    )
 
 
 def write_report_html(report: dict, output: Path | None = None) -> Path:
     """Write report_html to disk and return the path."""
     if "report_html" not in report:
         raise ValueError("report_html missing; enrich the report before writing HTML")
-    path = output or default_html_path(report["version"], report["as_of"])
+    path = output or resolve_html_output_path(
+        None,
+        version=report["version"],
+        as_of=report["as_of"],
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(report["report_html"], encoding="utf-8")
     resolved = path.resolve()
@@ -595,8 +632,13 @@ def write_report_html(report: dict, output: Path | None = None) -> Path:
 
 def attach_html_artifact(report: dict, output: Path | None = None) -> dict:
     """Write the HTML report and attach report_html_path to the report dict."""
-    path = write_report_html(report, output)
-    report["report_html_path"] = str(path)
+    path = resolve_html_output_path(
+        output,
+        version=report["version"],
+        as_of=report["as_of"],
+    )
+    resolved = write_report_html(report, path)
+    report["report_html_path"] = str(resolved)
     return report
 
 
@@ -647,7 +689,10 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--date", help="As-of date (YYYY-MM-DD); default is today")
     run.add_argument(
         "--html-output",
-        help="Write self-contained HTML report to this path (default: temp directory)",
+        help=(
+            "Write self-contained HTML report; appends {as-of}-{HHMMSS} before .html "
+            "(default: reports/rhdh-{version}-sos-{as-of}-{HHMMSS}.html)"
+        ),
     )
 
     args = parser.parse_args(argv)
