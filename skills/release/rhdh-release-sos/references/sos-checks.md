@@ -20,7 +20,7 @@ Every check row ends in a Jira query. The query decides **what** is counted; the
 | Query | What Jira counts | When to use it |
 |---|---|---|
 | `static "Name"` | The Rich Filter static filter **Name**, scoped to this release (`fixVersion`) | A **count** or **snapshot** — especially when you need `+ extra JQL` to narrow the scope |
-| `static "Name" + …` | Same static filter, plus extra JQL after `+` | A **slice** of that scope (e.g. not in a sprint, wrong status) |
+| `static "Name" + …` | Same static filter, plus extra JQL after `+` | A **slice** of that scope (e.g. not in a sprint, unassigned, wrong status) |
 | `due static "Name"` | **The same JQL as** bare `static "Name"` — full filter, no extras | **Due by milestone** **Name** — tracked from early in the section through that milestone day |
 | `expect assignee summary ~ "pattern"` | Open issues whose summary contains **pattern**, scoped to this release | A **named ticket must exist and have an assignee** — pass/fail, not a volume count |
 | `expect assignee summary ~ "pattern" + …` | Same, plus extra JQL after `+` | Narrow to one ticket shape (e.g. `issuetype = Epic`) |
@@ -109,6 +109,7 @@ this release `fixVersion`). They run from **FF - 21d** through **Feature Freeze 
 |------|-------|-------|
 | Feature Freeze | | |
 | FF - 21d | FF Stories, Tasks not in a sprint | static "Feature Freeze" + sprint is EMPTY AND issuetype in (Story, Task) |
+| FF - 21d | FF Stories, Tasks unassigned | static "Feature Freeze" + assignee is EMPTY AND issuetype in (Story, Task) |
 | FF - 21d | FF Epics, Stories, Tasks in New, To Do, or Backlog | static "Feature Freeze" + status in (New, "To Do", Backlog) |
 | FF - 21d | FF Epics Dev Complete | metric epic_dev_complete static "Feature Freeze" |
 | FF - 21d | Work remaining for Feature Freeze | due static "Feature Freeze" |

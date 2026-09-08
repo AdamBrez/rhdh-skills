@@ -83,3 +83,17 @@ class TestSelectChecks:
         )
         assert section.milestone_key == "feature_freeze"
         assert "Test Day ticket has owner" in [row.title for row in due]
+
+    def test_unassigned_stories_tasks_check_due_at_ff_minus_21d(self):
+        rows = checks_mod.attach_dates(checks_mod.load_checks(), MILESTONES)
+        due, _upcoming, section = checks_mod.select_checks(
+            rows, as_of=date(2026, 9, 1), milestones=MILESTONES
+        )
+        assert section.milestone_key == "feature_freeze"
+        row = next(row for row in due if row.title == "FF Stories, Tasks unassigned")
+        assert row.when_raw == "FF - 21d"
+        assert row.resolved_date == date(2026, 9, 1)
+        assert (
+            row.query
+            == 'static "Feature Freeze" + assignee is EMPTY AND issuetype in (Story, Task)'
+        )
