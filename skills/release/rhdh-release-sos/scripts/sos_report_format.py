@@ -24,7 +24,7 @@ def team_display_name(team_name: str) -> str:
 
 def check_summary(result: dict) -> str:
     """Short summary label for the Checks table."""
-    if result.get("kind") == "expect_assignee":
+    if result.get("kind") in ("expect_assignee", "testplan_children", "testplan_signoff"):
         if result.get("status") == "unverified":
             return "Unverified"
         return str(result.get("summary", "Unverified"))
@@ -54,6 +54,12 @@ def summary_css_class(result: dict) -> str:
     if result.get("kind") == "expect_assignee":
         if result.get("expect_state") == "assigned":
             return "summary-none"
+        return "summary-open"
+    if result.get("kind") in ("testplan_children", "testplan_signoff"):
+        if result.get("testplan_state") == "ok":
+            return "summary-none"
+        if result.get("testplan_state") in ("not_found", "ambiguous", "unverified"):
+            return "summary-open"
         return "summary-open"
     if result.get("kind") == "ratio":
         denominator = result.get("denominator")
@@ -113,11 +119,58 @@ def _html_team_breakdown_block(result: dict) -> str:
 
 
 def _html_check_due_line(result: dict) -> str:
-    if result.get("kind") != "due":
+    due_date = result.get("due_by_date")
+    if not due_date:
         return ""
-    due_date = result.get("due_by_date", "TBD")
     milestone = result.get("due_by_milestone", "Feature Freeze")
     return f'<div class="check-due">Complete by {escape(milestone)} · {escape(str(due_date))}</div>'
+
+
+def _html_issue_table_rows(issues: list[dict]) -> str:
+    rows: list[str] = []
+    for issue in issues:
+        key = escape(issue.get("key", ""))
+        url = issue.get("url") or ""
+        key_cell = (
+            f'<a class="issue-link" href="{escape(url, quote=True)}" '
+            f'target="_blank" rel="noopener noreferrer">{key}</a>'
+            if url
+            else key
+        )
+        rows.append(
+            "<tr>"
+            f"<td>{key_cell}</td>"
+            f"<td>{escape(issue.get('summary', ''))}</td>"
+            f"<td>{escape(issue.get('status', ''))}</td>"
+            "</tr>"
+        )
+    return "\n".join(rows)
+
+
+def _html_issue_list_block(result: dict) -> str:
+    if result.get("kind") != "testplan_signoff":
+        return ""
+    issues = result.get("issues", [])
+    if not issues:
+        return ""
+    count = len(issues)
+    label = "ticket" if count == 1 else "tickets"
+    return f"""
+      <details class="issue-breakdown">
+        <summary>Sign-off {label} open ({count})</summary>
+        <table class="issue-table">
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Summary</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {_html_issue_table_rows(issues)}
+          </tbody>
+        </table>
+      </details>"""
 
 
 def _html_team_table_rows(teams: list[dict]) -> str:
@@ -142,7 +195,15 @@ def _html_checks_section(results: list[dict]) -> str:
     for result in results:
         teams = result.get("teams", [])
         team_markup = _html_team_breakdown_block(result) if teams else ""
-        block_class = "check-block has-teams" if teams else "check-block"
+        issue_markup = _html_issue_list_block(result)
+        extra_class = []
+        if teams:
+            extra_class.append("has-teams")
+        if issue_markup:
+            extra_class.append("has-issues")
+        block_class = "check-block"
+        if extra_class:
+            block_class += " " + " ".join(extra_class)
         jira_link = _html_jira_link(
             result.get("issue_url") or result.get("jira_url"),
             label=result.get("issue_key") or "Open in Jira",
@@ -154,7 +215,7 @@ def _html_checks_section(results: list[dict]) -> str:
         <div class="check-title">{escape(result["title"])}{_html_check_due_line(result)}</div>
         <div class="check-summary">{_html_summary_badge(result)}</div>
         <div class="check-jira">{jira_link}</div>
-      </div>{team_markup}
+      </div>{issue_markup}{team_markup}
     </article>"""
         )
 
@@ -359,18 +420,56 @@ tr.milestone-active td {
 .team-breakdown[open] > summary {
   border-bottom: 1px solid var(--border);
 }
+.issue-breakdown {
+  border-top: 1px solid var(--check-row-border);
+  background: #fafbfd;
+}
+.issue-breakdown > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: #f6f8fc;
+}
+.issue-breakdown > summary::-webkit-details-marker {
+  display: none;
+}
+.issue-breakdown > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+}
+.issue-breakdown[open] > summary::before {
+  content: "▾";
+}
+.issue-breakdown[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+.issue-table,
 .team-table {
   width: 100%;
   margin: 0;
   font-size: 0.92rem;
 }
+.issue-table th,
+.issue-table td,
 .team-table th,
 .team-table td {
   padding: 0.55rem 0.75rem;
 }
+.issue-table th,
 .team-table th {
   background: #f3f5f8;
 }
+.issue-link {
+  color: #0066cc;
+  text-decoration: none;
+  font-weight: 600;
+}
+.issue-link:hover { text-decoration: underline; }
 .check-summary,
 .check-jira {
   font-weight: 600;
@@ -418,6 +517,8 @@ footer {
   .jira-link { color: inherit; text-decoration: underline; }
   .team-breakdown > summary { display: none; }
   .team-breakdown .team-table { display: table; }
+  .issue-breakdown > summary { display: none; }
+  .issue-breakdown .issue-table { display: table; }
 }
 """
 

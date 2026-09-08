@@ -24,6 +24,8 @@ Every check row ends in a Jira query. The query decides **what** is counted; the
 | `due static "Name"` | **The same JQL as** bare `static "Name"` — full filter, no extras | **Due by milestone** **Name** — tracked from early in the section through that milestone day |
 | `expect assignee summary ~ "pattern"` | Open issues whose summary contains **pattern**, scoped to this release | A **named ticket must exist and have an assignee** — pass/fail, not a volume count |
 | `expect assignee summary ~ "pattern" + …` | Same, plus extra JQL after `+` | Narrow to one ticket shape (e.g. `issuetype = Epic`) |
+| `testplan children assigned summary ~ "pattern"` | Test Plan **Epic** for this release; all open child Tasks must have an assignee by FF | Test-plan execution readiness |
+| `testplan signoff open summary ~ "pattern"` | Same epic; child tasks with **sign-off** in the summary must be **Closed** | Lists open sign-off tasks in HTML (collapsible) |
 | `metric epic_dev_complete static "Name"` | Epics under static filter **Name**; reports % in Dev Complete | Epic readiness before Feature Freeze |
 | `template blockers` | Named template from the Rich Filter overlay | Blocker bugs (and similar template-backed scopes) |
 | `queue "RNs Unclassified"` | Named Rich Filter queue + `fixVersion` | Queue-backed scopes such as release notes |
@@ -76,6 +78,16 @@ links to the search. No team breakdown — this is not team-scoped volume.
 Pick a **distinct enough** `summary ~` pattern so only the intended ticket matches.
 Add more checks by adding rows with different patterns.
 
+### `testplan` — Test Plan epic and its child tasks
+
+Both queries locate one **Test Plan** epic (`summary ~ "pattern"`, `issuetype = Epic`,
+this release `fixVersion`). They run from **FF - 21d** through **Feature Freeze day**.
+
+| Query | Pass | Action needed |
+|---|---|---|
+| `testplan children assigned …` | Every open child Task/Sub-task has an assignee | Unassigned child tasks remain — Jira links to the unassigned filter |
+| `testplan signoff open …` | Every sign-off child task is Closed | Sign-off tasks still open — listed under the check in HTML |
+
 ## Check notes
 
 - **Epic Dev Complete** (`metric epic_dev_complete static "Feature Freeze"`) uses
@@ -101,6 +113,8 @@ Add more checks by adding rows with different patterns.
 | FF - 21d | FF Epics Dev Complete | metric epic_dev_complete static "Feature Freeze" |
 | FF - 21d | Work remaining for Feature Freeze | due static "Feature Freeze" |
 | FF - 21d | Test Day ticket has owner | expect assignee summary ~ "Test Day" + issuetype = Epic |
+| FF - 21d | Test Plan tasks assigned | testplan children assigned summary ~ "Test Plan" |
+| FF - 21d | Test Plan sign-off complete | testplan signoff open summary ~ "Test Plan" |
 | FF - 0d | Feature Freeze day snapshot | static "Feature Freeze" |
 | Code Freeze | | |
 | CF - 14d | Blocker bugs outstanding | template blockers |

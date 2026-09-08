@@ -178,6 +178,61 @@ class TestReportFormat:
         assert 'class="summary summary-none"' in html
         assert ">RHIDP-9</a>" in html
 
+    def test_testplan_signoff_html_collapsible_list(self):
+        report = {
+            **SAMPLE_REPORT,
+            "results": [
+                {
+                    "title": "Test Plan sign-off complete",
+                    "kind": "testplan_signoff",
+                    "status": "ok",
+                    "testplan_state": "action_needed",
+                    "summary": "1 sign-off task open",
+                    "due_by_milestone": "Feature Freeze",
+                    "due_by_date": "2026-09-22",
+                    "epic_key": "RHIDP-100",
+                    "issue_key": "RHIDP-100",
+                    "issue_url": "https://redhat.atlassian.net/browse/RHIDP-100",
+                    "jira_url": "https://redhat.atlassian.net/browse/RHIDP-100",
+                    "issues": [
+                        {
+                            "key": "RHIDP-101",
+                            "summary": "QE sign-off",
+                            "status": "In Progress",
+                            "url": "https://redhat.atlassian.net/browse/RHIDP-101",
+                        }
+                    ],
+                    "teams": [],
+                }
+            ],
+        }
+        html = format_mod.render_report_html(report)
+        assert '<details class="issue-breakdown">' in html
+        assert "Sign-off ticket open (1)" in html
+        assert "RHIDP-101" in html
+        assert "Complete by Feature Freeze" in html
+
+    def test_testplan_children_links_unassigned_jira_filter(self):
+        report = {
+            **SAMPLE_REPORT,
+            "results": [
+                {
+                    "title": "Test Plan tasks assigned",
+                    "kind": "testplan_children",
+                    "status": "ok",
+                    "testplan_state": "action_needed",
+                    "summary": "2 unassigned tasks",
+                    "due_by_milestone": "Feature Freeze",
+                    "due_by_date": "2026-09-22",
+                    "jira_url": "https://redhat.atlassian.net/issues/?jql=parent+%3D+RHIDP-100+AND+assignee+is+EMPTY",
+                    "teams": [],
+                }
+            ],
+        }
+        markdown = format_mod.render_report_markdown(report)
+        assert "2 unassigned tasks" in markdown
+        assert "[Open in Jira](https://redhat.atlassian.net/issues/?jql=parent+%3D+RHIDP-100+AND+assignee+is+EMPTY)" in markdown
+
     def test_ratio_check_summary(self):
         result = {
             "kind": "ratio",

@@ -32,9 +32,13 @@ def due_static_milestone_key(query: str) -> str | None:
 def check_end_milestone_key(query: str) -> str | None:
     """Milestone after which this check must not run."""
     from sos_metrics import is_epic_dev_complete_query
+    from sos_testplan import testplan_end_milestone_key
 
     if is_epic_dev_complete_query(query):
         return "feature_freeze"
+    key = testplan_end_milestone_key(query)
+    if key:
+        return key
     return due_static_milestone_key(query)
 
 

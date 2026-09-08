@@ -30,6 +30,11 @@ Use the CLI `results[].summary` value only:
 | `Unassigned — find an owner` | Expect assignee — match exists, no assignee |
 | `Not found — create or link ticket` | Expect assignee — no matching open issue |
 | `Multiple matches (…)` | Expect assignee — pattern matched more than one issue |
+| `All assigned (N tasks)` | Test Plan — every open child task has an assignee |
+| `K unassigned tasks` | Test Plan — child tasks still need owners |
+| `Signed off (N tasks)` | Test Plan — all sign-off child tasks are Closed |
+| `K sign-off tasks open` | Test Plan — sign-off child tasks not Closed (see HTML list) |
+| `Test Plan epic not found` | No matching Test Plan epic for this release |
 
 ## Completion
 

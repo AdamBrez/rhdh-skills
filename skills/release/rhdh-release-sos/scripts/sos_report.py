@@ -25,6 +25,7 @@ import sos_due as due_mod  # noqa: E402
 import sos_expect as expect_mod  # noqa: E402
 import sos_metrics as metrics_mod  # noqa: E402
 import sos_report_format as format_mod  # noqa: E402
+import sos_testplan as testplan_mod  # noqa: E402
 
 
 def _today(as_of: str | None) -> date:
@@ -78,7 +79,8 @@ def _build_jql(query: str, version: str, jql_mod, rf_mod) -> str:
     raise ValueError(
         f'Unsupported query {query!r}. Use static "Name" [+ extra JQL], '
         'template NAME, queue "Name", metric epic_dev_complete static "Name", '
-        'or due static "Name", expect assignee summary ~ "pattern" [+ extra JQL].'
+        'due static "Name", expect assignee summary ~ "pattern" [+ extra JQL], '
+        'testplan children assigned|signoff open summary ~ "pattern" [+ extra JQL].'
     )
 
 
@@ -189,6 +191,120 @@ def _run_expect_assignee_check(
         "jira_url": jira_url,
         "teams": [],
     }
+
+
+def _run_testplan_check(
+    row: checks_mod.CheckRow,
+    version: str,
+    release_mod,
+    jql_mod,
+    fmt,
+    milestones: dict[str, str],
+) -> dict:
+    kind, pattern, query_extra = testplan_mod.parse_testplan_query(row.query)
+    epic_jql = testplan_mod.build_testplan_epic_jql(pattern, version, jql_mod, extra=query_extra)
+    ff_date = milestones.get("feature_freeze", "TBD")
+    result_kind = "testplan_children" if kind == "children assigned" else "testplan_signoff"
+
+    base = {
+        "id": row.when_raw.lower().replace(" ", "-"),
+        "title": row.title,
+        "when": row.when_raw,
+        "resolved_date": row.resolved_date.isoformat() if row.resolved_date else None,
+        "query": row.query,
+        "kind": result_kind,
+        "summary_pattern": pattern,
+        "due_by_milestone": "Feature Freeze",
+        "due_by_date": ff_date,
+        "teams": [],
+    }
+
+    try:
+        epics = release_mod._acli_json_enriched(
+            epic_jql,
+            select="key,summary,status",
+            limit=testplan_mod._EPIC_MATCH_LIMIT,
+        )
+        epic = testplan_mod.resolve_testplan_epic(epics)
+        if epic["state"] != "ok":
+            return {
+                **base,
+                "status": "ok",
+                "error": None,
+                "testplan_state": epic["state"],
+                "summary": epic["summary"],
+                "epic_key": None,
+                "epic_url": None,
+                "issue_key": None,
+                "issue_url": None,
+                "jira_url": jql_mod.jira_url(epic_jql),
+                "issues": [],
+            }
+
+        epic_key = epic["epic_key"]
+        assert epic_key
+
+        if kind == "children assigned":
+            child_jql = testplan_mod.children_jql(epic_key)
+            children = release_mod._acli_json_enriched(
+                child_jql,
+                select="key,summary,status,assignee",
+                limit=testplan_mod._CHILD_SEARCH_LIMIT,
+            )
+            evaluation = testplan_mod.evaluate_children_assigned(children)
+            if evaluation.get("unassigned_count"):
+                jira_url = jql_mod.jira_url(testplan_mod.unassigned_children_jql(epic_key))
+                issue_key = None
+                issue_url = None
+            else:
+                jira_url = epic["epic_url"]
+                issue_key = epic_key
+                issue_url = epic["epic_url"]
+            issues = []
+        else:
+            signoff_jql = testplan_mod.signoff_tasks_jql(epic_key)
+            signoff_tasks = release_mod._acli_json_enriched(
+                signoff_jql,
+                select="key,summary,status,assignee",
+                limit=testplan_mod._CHILD_SEARCH_LIMIT,
+            )
+            evaluation = testplan_mod.evaluate_signoff_open(signoff_tasks)
+            jira_url = epic["epic_url"] or jql_mod.jira_url(testplan_mod.signoff_open_jql(epic_key))
+            issue_key = epic_key
+            issue_url = epic["epic_url"]
+            issues = evaluation.get("issues", [])
+
+        return {
+            **base,
+            "status": "ok",
+            "error": None,
+            "testplan_state": evaluation["state"],
+            "summary": evaluation["summary"],
+            "epic_key": epic_key,
+            "epic_url": epic["epic_url"],
+            "issue_key": issue_key,
+            "issue_url": issue_url,
+            "jira_url": jira_url,
+            "issues": issues,
+            "child_count": evaluation.get("child_count"),
+            "unassigned_count": evaluation.get("unassigned_count"),
+            "signoff_count": evaluation.get("signoff_count"),
+            "open_count": evaluation.get("open_count"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            **base,
+            "status": "unverified",
+            "error": str(exc),
+            "testplan_state": "unverified",
+            "summary": "Unverified",
+            "epic_key": None,
+            "epic_url": None,
+            "issue_key": None,
+            "issue_url": None,
+            "jira_url": jql_mod.jira_url(epic_jql),
+            "issues": [],
+        }
 
 
 def _run_ratio_team_breakdown(
@@ -347,6 +463,8 @@ def _run_check(
         )
     if expect_mod.is_expect_assignee_query(row.query):
         return _run_expect_assignee_check(row, version, release_mod, jql_mod, fmt)
+    if testplan_mod.is_testplan_query(row.query):
+        return _run_testplan_check(row, version, release_mod, jql_mod, fmt, milestones)
 
     jql = _build_jql(row.query, version, jql_mod, rf_mod)
     url = jql_mod.jira_url(jql)
