@@ -77,7 +77,7 @@ Do not treat the run as complete unless `report_html_path` exists on disk.
 
 - [ ] `report_markdown` is shown unchanged from the CLI
 - [ ] `report_html_path` exists on disk and was shared with the user
-- [ ] Every due check row has a summary and `[Open in Jira](url)` link
+- [ ] Every due check row has a summary and Jira link per `references/report-template.md`
 - [ ] Every due check includes an action item and team sub-rows with summary and Jira link where Cloud ID exists
 - [ ] No upcoming-checks section and no runbook execution metadata were added
 - [ ] Nothing was posted
