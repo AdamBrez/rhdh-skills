@@ -5,11 +5,13 @@ The CLI renders a self-contained HTML page from the same report data as
 
 ## Structure
 
-1. Header — title and metadata (`As of`, `Release phase`, `Next milestone`)
+1. Header — title and metadata (`As of` with UTC date and time, `Release phase`, `Next milestone`)
 2. Milestones — table; highlight the active release phase row
-3. Checks — highlighted check rows with summary and Jira link
+3. Checks — highlighted check rows with summary and Jira link; when an action item
+   exists, a small info icon after the check name shows the text on hover or focus
+   (CSS tooltip, no JavaScript)
 4. Team breakdown — collapsed in `<details>` (HTML only)
-5. Footer — generation date
+5. Footer — report label only (`RHDH release SoS check-in`)
 
 Check rows use bold text and a light background. Issue-list checks show the due date,
 count, and Jira link on the check row only — no ticket tables. Team breakdown stays in a

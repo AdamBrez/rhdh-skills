@@ -7,9 +7,11 @@ Present the CLI `report_markdown` field unchanged. The layout is fixed in
 
 1. Title and metadata table — as-of date, release phase, next milestone
 2. Milestones — four rows: Feature Freeze, Code Freeze, Go/No Go, GA Announce
-3. Checks — one row per due check with summary and `[Open in Jira](url)`, then one
-   sub-row per engineering team (`↳ Team name`) with the same check scoped to that
-   team and its own Jira link
+3. Checks — one row per due check with summary and Jira link; when the runbook defines
+   an action item, a second sub-row under the check name (ℹ prefix in markdown). In
+   HTML, the same text appears in a hover/focus tooltip on an info icon after the
+   check name; then team sub-rows (`↳ Team name`) scoped to that team with its own
+   Jira link
 
 Do not add upcoming checks, follow-up bullet lists, executive narrative, or runbook
 execution metadata.

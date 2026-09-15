@@ -52,6 +52,7 @@ class CheckRow:
     when_raw: str
     title: str
     query: str
+    action_item: str = ""
     resolved_date: date | None = None
 
 
@@ -89,6 +90,7 @@ def parse_checks(text: str) -> list[SectionHeader | CheckRow]:
             continue
 
         when_raw, title, query = cells[0], cells[1], cells[2]
+        action_item = cells[3].strip() if len(cells) > 3 else ""
         header_key = _SECTION_HEADERS.get(when_raw.strip().lower())
         if header_key and not title and not query:
             current_section = SectionHeader(title=when_raw.strip(), milestone_key=header_key)
@@ -104,6 +106,7 @@ def parse_checks(text: str) -> list[SectionHeader | CheckRow]:
                 when_raw=when_raw.strip(),
                 title=title.strip(),
                 query=query.strip(),
+                action_item=action_item,
             )
         )
 
@@ -156,6 +159,7 @@ def attach_dates(
                 when_raw=row.when_raw,
                 title=row.title,
                 query=row.query,
+                action_item=row.action_item,
                 resolved_date=resolve_when(row.when_raw, milestones),
             )
         )

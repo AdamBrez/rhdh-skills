@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from html import escape
 
 import sos_metrics as metrics_mod
@@ -12,6 +13,22 @@ _MILESTONE_ORDER = [
     ("go_no_go", "Go/No Go"),
     ("ga_announce", "GA Announce"),
 ]
+
+
+def format_generated_at(value: str | datetime) -> str:
+    """Format an ISO timestamp for report metadata (UTC with explicit zone)."""
+    dt = datetime.fromisoformat(value) if isinstance(value, str) else value
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def report_as_of_display(report: dict) -> str:
+    """Human-readable As of value for rendered reports."""
+    generated_raw = report.get("generated_at")
+    if generated_raw:
+        return format_generated_at(generated_raw)
+    return f"{report['as_of']} 00:00:00 UTC"
 
 
 def team_display_name(team_name: str) -> str:
@@ -89,6 +106,46 @@ def _html_summary_badge(result: dict) -> str:
     summary = check_summary(result)
     css_class = summary_css_class(result)
     return f'<span class="summary {css_class}">{escape(summary)}</span>'
+
+
+def _html_action_icon() -> str:
+    return """
+          <svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+            <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM7.25 7h1.5v4.25H7.25V7Zm.75-2.5a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Z"/>
+          </svg>"""
+
+
+def _html_action_hint(result: dict) -> str:
+    action_item = (result.get("action_item") or "").strip()
+    if not action_item:
+        return ""
+    safe_text = escape(action_item)
+    return f"""
+        <span class="check-action-hint">
+          <span class="check-action-trigger" tabindex="0" role="img" aria-label="Action item: {safe_text}">
+            {_html_action_icon()}
+          </span>
+          <span class="check-action-popup" role="tooltip">{safe_text}</span>
+        </span>"""
+
+
+def _html_check_title(result: dict) -> str:
+    due_line = _html_check_due_line(result)
+    hint = _html_action_hint(result)
+    if hint:
+        return (
+            f'<div class="check-title">'
+            f'<span class="check-title-line">{escape(result["title"])}{hint}</span>'
+            f"{due_line}</div>"
+        )
+    return f'<div class="check-title">{escape(result["title"])}{due_line}</div>'
+
+
+def _markdown_action_item_row(action_item: str) -> str:
+    text = action_item.strip()
+    if not text:
+        return ""
+    return f"| ↳ ℹ {text} | | |"
 
 
 def _html_team_breakdown_block(result: dict) -> str:
@@ -196,6 +253,10 @@ def _html_checks_section(results: list[dict]) -> str:
         teams = result.get("teams", [])
         team_markup = _html_team_breakdown_block(result) if teams else ""
         issue_markup = _html_issue_list_block(result)
+        jira_link = _html_jira_link(
+            result.get("issue_url") or result.get("jira_url"),
+            label=result.get("issue_key") or "Open in Jira",
+        )
         extra_class = []
         if teams:
             extra_class.append("has-teams")
@@ -204,15 +265,11 @@ def _html_checks_section(results: list[dict]) -> str:
         block_class = "check-block"
         if extra_class:
             block_class += " " + " ".join(extra_class)
-        jira_link = _html_jira_link(
-            result.get("issue_url") or result.get("jira_url"),
-            label=result.get("issue_key") or "Open in Jira",
-        )
         blocks.append(
             f"""
     <article class="{block_class}">
       <div class="check-row">
-        <div class="check-title">{escape(result["title"])}{_html_check_due_line(result)}</div>
+        {_html_check_title(result)}
         <div class="check-summary">{_html_summary_badge(result)}</div>
         <div class="check-jira">{jira_link}</div>
       </div>{issue_markup}{team_markup}
@@ -319,6 +376,7 @@ header h1 {
 }
 section {
   padding: 1.25rem 2rem 1.75rem;
+  overflow: visible;
 }
 section + section {
   border-top: 1px solid var(--border);
@@ -370,21 +428,34 @@ tr.milestone-active td {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
+  overflow: visible;
 }
 .check-block {
+  position: relative;
+  z-index: 1;
   border: 1px solid var(--check-row-border);
   border-radius: 10px;
-  overflow: hidden;
+  overflow: visible;
   background: var(--surface);
 }
+.check-block:has(.check-action-hint:hover),
+.check-block:has(.check-action-hint:focus-within) {
+  z-index: 50;
+}
 .check-row {
+  position: relative;
+  z-index: 1;
   padding: 0.8rem 0.75rem;
   background: var(--check-row-bg);
   font-weight: 700;
+  overflow: visible;
 }
 .check-title {
   font-weight: 700;
   color: var(--text);
+}
+.check-title-line {
+  display: inline;
 }
 .check-due {
   margin-top: 0.2rem;
@@ -392,7 +463,67 @@ tr.milestone-active td {
   font-weight: 600;
   color: var(--muted);
 }
+.check-action-hint {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 0.35rem;
+  top: -0.05rem;
+  z-index: 2;
+}
+.check-action-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.95rem;
+  height: 0.95rem;
+  color: #8b939e;
+  cursor: help;
+  border-radius: 999px;
+  outline: none;
+}
+.check-action-trigger svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.check-action-trigger:hover,
+.check-action-trigger:focus-visible {
+  color: #5c6570;
+  background: rgba(255, 255, 255, 0.65);
+}
+.check-action-popup {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.35rem);
+  top: auto;
+  z-index: 100;
+  min-width: 14rem;
+  max-width: min(22rem, calc(100vw - 2rem));
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--text);
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.check-action-hint:hover .check-action-popup,
+.check-action-hint:focus-within .check-action-popup {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
 .team-breakdown {
+  position: relative;
+  z-index: 0;
   border-top: 1px solid var(--check-row-border);
   background: #fafbfd;
 }
@@ -526,7 +657,7 @@ footer {
 def render_report_html(report: dict) -> str:
     """Render a self-contained HTML page for the SoS report."""
     version = escape(report["version"])
-    as_of = escape(report["as_of"])
+    as_of = escape(report_as_of_display(report))
     section = escape(report["active_section"]["title"])
     next_milestone = escape(_next_milestone_line(report))
     title = f"RHDH {version} — SoS Release Check-in"
@@ -568,7 +699,7 @@ def render_report_html(report: dict) -> str:
       <h2>Checks</h2>
       {_html_checks_section(report.get("results", []))}
     </section>
-    <footer>Generated {as_of} · RHDH release SoS check-in</footer>
+    <footer>RHDH release SoS check-in</footer>
   </main>
 </body>
 </html>
@@ -624,6 +755,9 @@ def _check_rows(results: list[dict]) -> str:
         lines.append(
             f"| {result['title']} | {check_summary(result)} | {_result_jira_cell(result)} |"
         )
+        action_row = _markdown_action_item_row(result.get("action_item", ""))
+        if action_row:
+            lines.append(action_row)
         for team in result.get("teams", []):
             label = team_display_name(team["team_name"])
             lines.append(
@@ -635,7 +769,7 @@ def _check_rows(results: list[dict]) -> str:
 def render_report_markdown(report: dict) -> str:
     """Render the fixed SoS report template."""
     version = report["version"]
-    as_of = report["as_of"]
+    as_of = report_as_of_display(report)
     section = report["active_section"]["title"]
     milestone_cells = _milestone_cells(report)
 

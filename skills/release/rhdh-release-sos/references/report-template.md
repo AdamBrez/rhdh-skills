@@ -28,16 +28,18 @@ improvise prose around it.
 {{CHECK_ROWS}}
 ```
 
-Each `{{CHECK_ROW}}` is one due check followed by its team sub-rows:
+Each due check uses one or more table rows:
 
 ```markdown
 | {{CHECK_TITLE}} | {{CHECK_SUMMARY}} | [Open in Jira]({{JIRA_URL}}) |
+| ↳ ℹ {{ACTION_ITEM}} | | |
 | ↳ {{TEAM_NAME}} | {{TEAM_SUMMARY}} | [Open in Jira]({{TEAM_JIRA_URL}}) |
 ```
 
-Team sub-rows use engineering teams from the RHDH Team Mapping spreadsheet with a
-Jira Cloud ID. The team filter is the same check query plus
-`"Team[Team]" = "<cloud_id>"`. Omit teams without a Cloud ID.
+Omit the `↳ ℹ …` row when the runbook leaves Action item blank. Team sub-rows use
+engineering teams from the RHDH Team Mapping spreadsheet with a Jira Cloud ID. The
+team filter is the same check query plus `"Team[Team]" = "<cloud_id>"`. Omit teams
+without a Cloud ID.
 
 When no checks are due:
 

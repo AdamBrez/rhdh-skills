@@ -84,6 +84,18 @@ def _build_jql(query: str, version: str, jql_mod, rf_mod) -> str:
     )
 
 
+def _check_result_base(row: checks_mod.CheckRow) -> dict:
+    """Common metadata copied from a runbook row into a check result."""
+    return {
+        "id": row.when_raw.lower().replace(" ", "-"),
+        "title": row.title,
+        "when": row.when_raw,
+        "resolved_date": row.resolved_date.isoformat() if row.resolved_date else None,
+        "query": row.query,
+        "action_item": row.action_item,
+    }
+
+
 def _filter_due_checks(
     due: list[checks_mod.CheckRow],
     *,
@@ -122,11 +134,7 @@ def _run_due_static_check(
     due_date = milestones.get(milestone_key, "TBD")
 
     return {
-        "id": row.when_raw.lower().replace(" ", "-"),
-        "title": row.title,
-        "when": row.when_raw,
-        "resolved_date": row.resolved_date.isoformat() if row.resolved_date else None,
-        "query": row.query,
+        **_check_result_base(row),
         "kind": "due",
         "due_by_milestone": filter_name,
         "due_by_date": due_date,
@@ -173,11 +181,7 @@ def _run_expect_assignee_check(
     jira_url = evaluation.get("issue_url") or search_url
 
     return {
-        "id": row.when_raw.lower().replace(" ", "-"),
-        "title": row.title,
-        "when": row.when_raw,
-        "resolved_date": row.resolved_date.isoformat() if row.resolved_date else None,
-        "query": row.query,
+        **_check_result_base(row),
         "kind": "expect_assignee",
         "summary_pattern": pattern,
         "expect_state": evaluation["expect_state"],
@@ -207,11 +211,7 @@ def _run_testplan_check(
     result_kind = "testplan_children" if kind == "children assigned" else "testplan_signoff"
 
     base = {
-        "id": row.when_raw.lower().replace(" ", "-"),
-        "title": row.title,
-        "when": row.when_raw,
-        "resolved_date": row.resolved_date.isoformat() if row.resolved_date else None,
-        "query": row.query,
+        **_check_result_base(row),
         "kind": result_kind,
         "summary_pattern": pattern,
         "due_by_milestone": "Feature Freeze",
@@ -389,11 +389,7 @@ def _run_epic_dev_complete_check(
         )
 
     return {
-        "id": row.when_raw.lower().replace(" ", "-"),
-        "title": row.title,
-        "when": row.when_raw,
-        "resolved_date": row.resolved_date.isoformat() if row.resolved_date else None,
-        "query": row.query,
+        **_check_result_base(row),
         "kind": "ratio",
         "numerator": numerator_value,
         "denominator": denominator_value,
@@ -471,11 +467,7 @@ def _run_check(
     count, status, error = _count_jql(jql, release_mod, fmt)
 
     return {
-        "id": row.when_raw.lower().replace(" ", "-"),
-        "title": row.title,
-        "when": row.when_raw,
-        "resolved_date": row.resolved_date.isoformat() if row.resolved_date else None,
-        "query": row.query,
+        **_check_result_base(row),
         "count": count,
         "status": status,
         "error": error,
@@ -531,6 +523,7 @@ def build_report(
 
     fmt = OutputFormatter(mode="json")
     teams = release_mod._fetch_teams(category="Engineering") if execute else []
+    generated_at = datetime.now(timezone.utc) if execute else None
     executed = []
     if execute:
         for row in due:
@@ -542,6 +535,7 @@ def build_report(
         {
             "version": version,
             "as_of": as_of.isoformat(),
+            "generated_at": generated_at.isoformat() if generated_at else None,
             "active_section": {
                 "title": active_section.title,
                 "milestone_key": active_section.milestone_key,
@@ -553,6 +547,7 @@ def build_report(
                     "when": row.when_raw,
                     "resolved_date": row.resolved_date.isoformat() if row.resolved_date else None,
                     "query": row.query,
+                    "action_item": row.action_item,
                 }
                 for row in due
             ],
@@ -562,6 +557,7 @@ def build_report(
                     "when": row.when_raw,
                     "resolved_date": row.resolved_date.isoformat() if row.resolved_date else None,
                     "query": row.query,
+                    "action_item": row.action_item,
                 }
                 for row in upcoming
             ],
@@ -613,6 +609,16 @@ def default_html_path(
     )
 
 
+def _report_generated_at(report: dict) -> datetime | None:
+    raw = report.get("generated_at")
+    if not raw:
+        return None
+    parsed = datetime.fromisoformat(raw)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def write_report_html(report: dict, output: Path | None = None) -> Path:
     """Write report_html to disk and return the path."""
     if "report_html" not in report:
@@ -621,6 +627,7 @@ def write_report_html(report: dict, output: Path | None = None) -> Path:
         None,
         version=report["version"],
         as_of=report["as_of"],
+        generated_at=_report_generated_at(report),
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(report["report_html"], encoding="utf-8")
@@ -636,6 +643,7 @@ def attach_html_artifact(report: dict, output: Path | None = None) -> dict:
         output,
         version=report["version"],
         as_of=report["as_of"],
+        generated_at=_report_generated_at(report),
     )
     resolved = write_report_html(report, path)
     report["report_html_path"] = str(resolved)

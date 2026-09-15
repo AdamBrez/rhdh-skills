@@ -13,13 +13,13 @@ if str(_SOS_SCRIPTS) not in sys.path:
 import sos_checks as checks_mod  # noqa: E402
 
 SAMPLE_TABLE = """
-| When | Check | Query |
-|------|-------|-------|
-| Feature Freeze | | |
-| FF - 21d | FF scope not in sprint | static "Feature Freeze" + sprint is EMPTY |
-| FF - 7d | FF scope still in New | static "Feature Freeze" + status = New |
-| Code Freeze | | |
-| CF - 7d | Blocker bugs | template blockers |
+| When | Check | Query | Action item |
+|------|-------|-------|-------------|
+| Feature Freeze | | | |
+| FF - 21d | FF scope not in sprint | static "Feature Freeze" + sprint is EMPTY | Plan every FF Story and Task into the current or next sprint. |
+| FF - 7d | FF scope still in New | static "Feature Freeze" + status = New | Move FF scope out of New into active work. |
+| Code Freeze | | | |
+| CF - 7d | Blocker bugs | template blockers | Resolve or downgrade every open blocker before Code Freeze. |
 """
 
 MILESTONES = {
@@ -36,6 +36,9 @@ class TestParseChecks:
         assert len(rows) == 5
         assert rows[0].title == "Feature Freeze"
         assert rows[1].title == "FF scope not in sprint"
+        assert rows[1].action_item == (
+            "Plan every FF Story and Task into the current or next sprint."
+        )
         assert rows[3].title == "Code Freeze"
 
 
@@ -97,3 +100,19 @@ class TestSelectChecks:
             row.query
             == 'static "Feature Freeze" + assignee is EMPTY AND issuetype in (Story, Task)'
         )
+        assert row.action_item == "Assign an owner to every unassigned FF Story and Task."
+
+    def test_snapshot_checks_may_leave_action_item_blank(self):
+        rows = checks_mod.load_checks()
+        ff_snapshot = next(
+            row
+            for row in rows
+            if isinstance(row, checks_mod.CheckRow) and row.title == "Feature Freeze day snapshot"
+        )
+        cf_snapshot = next(
+            row
+            for row in rows
+            if isinstance(row, checks_mod.CheckRow) and row.title == "Code Freeze day snapshot"
+        )
+        assert ff_snapshot.action_item == ""
+        assert cf_snapshot.action_item == ""

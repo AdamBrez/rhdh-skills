@@ -51,6 +51,7 @@ SAMPLE_REPORT = {
     "results": [
         {
             "title": "FF Stories, Tasks not in a sprint",
+            "action_item": "Plan every FF Story and Task into the current or next sprint.",
             "count": 157,
             "status": "ok",
             "jira_url": "https://redhat.atlassian.net/issues/?jql=sprint+is+EMPTY",
@@ -71,6 +72,7 @@ SAMPLE_REPORT = {
         },
         {
             "title": "FF Epics, Stories, Tasks in New, To Do, or Backlog",
+            "action_item": "Move FF scope out of New, To Do, or Backlog into active work.",
             "count": 0,
             "status": "ok",
             "jira_url": "https://redhat.atlassian.net/issues/?jql=status+in+New",
@@ -95,11 +97,14 @@ class TestReportFormat:
     def test_fixed_template_shape(self):
         markdown = format_mod.render_report_markdown(SAMPLE_REPORT)
         assert markdown.startswith("# RHDH 2.1.0 — SoS Release Check-in\n")
+        assert "| As of | 2026-09-02 00:00:00 UTC |" in markdown
         assert "| Release phase | Feature Freeze |" in markdown
         assert "## Milestones" in markdown
         assert "## Checks" in markdown
         assert "| ↳ COPE | 12 open | [Open in Jira]" in markdown
         assert "| ↳ COPE | None open | [Open in Jira]" in markdown
+        assert "| ↳ ℹ Plan every FF Story and Task into the current or next sprint." in markdown
+        assert "| Action item |" not in markdown
         assert "Upcoming checks" not in markdown
         assert "Follow-up" not in markdown
         assert "executed" not in markdown.lower()
@@ -115,12 +120,68 @@ class TestReportFormat:
         assert "[Open in Jira]" in enriched["report_markdown"]
         assert enriched["report_html"].startswith("<!DOCTYPE html>")
         assert "RHDH 2.1.0 — SoS Release Check-in" in enriched["report_html"]
+        assert "<dt>Generated at</dt>" not in enriched["report_html"]
         assert 'class="summary summary-open"' in enriched["report_html"]
         assert 'class="check-row"' in enriched["report_html"]
+        assert 'class="check-action-hint"' in enriched["report_html"]
+        assert 'class="check-action-popup"' in enriched["report_html"]
+        assert ".check-block:has(.check-action-hint:hover)" in enriched["report_html"]
+        assert "overflow: visible" in enriched["report_html"]
+        assert 'class="check-action-row"' not in enriched["report_html"]
+        assert (
+            "Plan every FF Story and Task into the current or next sprint."
+            in enriched["report_html"]
+        )
         assert '<details class="team-breakdown">' in enriched["report_html"]
         assert '<details class="team-breakdown" open>' not in enriched["report_html"]
         assert 'class="team-table"' in enriched["report_html"]
         assert "<style>" in enriched["report_html"]
+
+    def test_html_as_of_includes_utc_timestamp(self):
+        report = {
+            **SAMPLE_REPORT,
+            "generated_at": "2026-09-09T08:31:49+00:00",
+        }
+        html = format_mod.render_report_html(report)
+        assert "<dt>As of</dt><dd>2026-09-09 08:31:49 UTC</dd>" in html
+        assert "<dt>Generated at</dt>" not in html
+        assert "<footer>RHDH release SoS check-in</footer>" in html
+
+    def test_report_as_of_display(self):
+        assert (
+            format_mod.report_as_of_display({"as_of": "2026-09-02", "generated_at": None})
+            == "2026-09-02 00:00:00 UTC"
+        )
+        assert (
+            format_mod.report_as_of_display(
+                {"as_of": "2026-09-02", "generated_at": "2026-09-09T08:31:49+00:00"}
+            )
+            == "2026-09-09 08:31:49 UTC"
+        )
+
+    def test_format_generated_at(self):
+        assert (
+            format_mod.format_generated_at("2026-09-09T08:23:15+00:00") == "2026-09-09 08:23:15 UTC"
+        )
+
+    def test_blank_action_item_omits_html_hint_and_markdown_row(self):
+        report = {
+            **SAMPLE_REPORT,
+            "results": [
+                {
+                    "title": "Feature Freeze day snapshot",
+                    "action_item": "",
+                    "count": 42,
+                    "status": "ok",
+                    "jira_url": "https://redhat.atlassian.net/issues/?jql=ff",
+                    "teams": [],
+                }
+            ],
+        }
+        markdown = format_mod.render_report_markdown(report)
+        html = format_mod.render_report_html(report)
+        assert "↳ ℹ" not in markdown
+        assert 'class="check-action-hint"' not in html
 
     def test_summary_css_class(self):
         assert format_mod.summary_css_class({"status": "ok", "count": 0}) == "summary-none"
@@ -231,7 +292,10 @@ class TestReportFormat:
         }
         markdown = format_mod.render_report_markdown(report)
         assert "2 unassigned tasks" in markdown
-        assert "[Open in Jira](https://redhat.atlassian.net/issues/?jql=parent+%3D+RHIDP-100+AND+assignee+is+EMPTY)" in markdown
+        assert (
+            "[Open in Jira](https://redhat.atlassian.net/issues/?jql=parent+%3D+RHIDP-100+AND+assignee+is+EMPTY)"
+            in markdown
+        )
 
     def test_ratio_check_summary(self):
         result = {
@@ -252,6 +316,7 @@ class TestReportFormat:
             "results": [
                 {
                     "title": "FF work remaining for Feature Freeze",
+                    "action_item": "Close or defer all FF-scope work before Feature Freeze.",
                     "kind": "due",
                     "due_by_date": "2026-09-22",
                     "count": 2,
@@ -270,8 +335,9 @@ class TestReportFormat:
         }
         markdown = format_mod.render_report_markdown(report)
         assert "## Remaining for Feature Freeze" not in markdown
-        assert "FF work remaining for Feature Freeze | 2 open | [Open in Jira]" in markdown
-        assert "| ↳ COPE | 1 open | [Open in Jira]" in markdown
+        assert "FF work remaining for Feature Freeze | 2 open |" in markdown
+        assert "Close or defer all FF-scope work before Feature Freeze." in markdown
+        assert "| ↳ COPE | 1 open |" in markdown
 
     def test_due_static_html_check_row_only(self):
         report = {
