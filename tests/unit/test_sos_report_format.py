@@ -137,13 +137,15 @@ class TestReportFormat:
         assert 'class="team-table"' in enriched["report_html"]
         assert "<style>" in enriched["report_html"]
 
-    def test_html_as_of_includes_utc_timestamp(self):
+    def test_html_as_of_uses_calendar_date_not_generated_at(self):
         report = {
             **SAMPLE_REPORT,
-            "generated_at": "2026-09-09T08:31:49+00:00",
+            "as_of": "2026-09-08",
+            "generated_at": "2026-09-18T15:30:00+00:00",
         }
         html = format_mod.render_report_html(report)
-        assert "<dt>As of</dt><dd>2026-09-09 08:31:49 UTC</dd>" in html
+        assert "<dt>As of</dt><dd>2026-09-08 00:00:00 UTC</dd>" in html
+        assert "2026-09-18" not in html
         assert "<dt>Generated at</dt>" not in html
         assert "<footer>RHDH release SoS check-in</footer>" in html
 
@@ -154,9 +156,9 @@ class TestReportFormat:
         )
         assert (
             format_mod.report_as_of_display(
-                {"as_of": "2026-09-02", "generated_at": "2026-09-09T08:31:49+00:00"}
+                {"as_of": "2026-09-08", "generated_at": "2026-09-18T15:30:00+00:00"}
             )
-            == "2026-09-09 08:31:49 UTC"
+            == "2026-09-08 00:00:00 UTC"
         )
 
     def test_format_generated_at(self):

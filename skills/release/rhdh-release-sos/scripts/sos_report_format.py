@@ -24,10 +24,11 @@ def format_generated_at(value: str | datetime) -> str:
 
 
 def report_as_of_display(report: dict) -> str:
-    """Human-readable As of value for rendered reports."""
-    generated_raw = report.get("generated_at")
-    if generated_raw:
-        return format_generated_at(generated_raw)
+    """Human-readable As of value for rendered reports.
+
+    Always the calendar date that selected due checks (`as_of`), not wall-clock
+    generation time. Generation time stays on `generated_at` in the JSON payload.
+    """
     return f"{report['as_of']} 00:00:00 UTC"
 
 

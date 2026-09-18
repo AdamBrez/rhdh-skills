@@ -5,7 +5,8 @@ The CLI renders a self-contained HTML page from the same report data as
 
 ## Structure
 
-1. Header — title and metadata (`As of` with UTC date and time, `Release phase`, `Next milestone`)
+1. Header — title and metadata (`As of` = report calendar date at `00:00:00 UTC`,
+   `Release phase`, `Next milestone`). Generation time is `generated_at` in JSON only.
 2. Milestones — table; highlight the active release phase row
 3. Checks — highlighted check rows with summary and Jira link; when an action item
    exists, a small info icon after the check name shows the text on hover or focus
