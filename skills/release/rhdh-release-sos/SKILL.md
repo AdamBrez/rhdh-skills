@@ -6,7 +6,7 @@ description: >-
   Jira counts from the RHIDP Operational Rich Filter. Use for "SoS report for
   2.1.0", "scrum of scrums release status", "release check-in for team leads",
   or "what should we review before feature freeze".
-compatibility: "Python 3.9+ and uv; /rhdh-release-status and /rhdh-release-schedule; acli with a Jira session; gog for engineering team Cloud IDs; an RHIDP Operational Rich Filter export."
+compatibility: "Python 3.9+ and uv; /rhdh-release-status and /rhdh-release-schedule (install both beside this skill — the SoS CLI imports release-status scripts and fails if they are missing); acli with a Jira session; gog for engineering team Cloud IDs; an RHIDP Operational Rich Filter export."
 ---
 
 # RHDH release SoS check-in
