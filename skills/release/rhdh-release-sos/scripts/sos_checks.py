@@ -117,7 +117,7 @@ def parse_checks(text: str) -> list[SectionHeader | CheckRow]:
 
 def load_checks(base: Path | None = None) -> list[SectionHeader | CheckRow]:
     path = checks_path(base)
-    return parse_checks(path.read_text())
+    return parse_checks(path.read_text(encoding="utf-8"))
 
 
 def _parse_iso(value: str) -> date:
