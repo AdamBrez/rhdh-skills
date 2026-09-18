@@ -269,7 +269,11 @@ def _run_testplan_check(
                 limit=testplan_mod._CHILD_SEARCH_LIMIT,
             )
             evaluation = testplan_mod.evaluate_signoff_open(signoff_tasks)
-            jira_url = epic["epic_url"] or jql_mod.jira_url(testplan_mod.signoff_open_jql(epic_key))
+            jira_url = (
+                jql_mod.jira_url(testplan_mod.signoff_open_jql(epic_key))
+                if evaluation.get("open_count")
+                else epic["epic_url"]
+            )
             issue_key = epic_key
             issue_url = epic["epic_url"]
             issues = evaluation.get("issues", [])
