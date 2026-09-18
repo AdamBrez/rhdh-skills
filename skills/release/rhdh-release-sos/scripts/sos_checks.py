@@ -178,12 +178,12 @@ def current_section_key(as_of: date, milestones: dict[str, str]) -> str:
     if not ordered:
         raise ValueError("No milestone dates available to determine the current section")
 
-    if as_of < ordered[0][1]:
+    if as_of <= ordered[0][1]:
         return ordered[0][0]
 
     for index in range(len(ordered) - 1):
         start, end = ordered[index][1], ordered[index + 1][1]
-        if start <= as_of < end:
+        if start < as_of <= end:
             return ordered[index + 1][0]
 
     return ordered[-1][0]
