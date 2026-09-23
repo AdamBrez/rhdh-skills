@@ -25,6 +25,7 @@ Which one answers a given version is a lookup, not a decision the user makes.
 - What is still open against a release is `/rhdh-release-status`.
 - Drafting the Slack message that goes out at a freeze is
   `/rhdh-release-announce`, which pulls the date it needs itself.
+- The SoS check-in report for team leads is `/rhdh-release-sos`.
 - Which OCP, AKS, EKS, GKE, or PostgreSQL versions a release supports, and when
   they go end-of-life, is `/rhdh-platform-lifecycle`. Product lifecycle is not a
   release milestone.

@@ -346,6 +346,16 @@
       "requiresExternalSkills": []
     },
     {
+      "name": "rhdh-release-sos",
+      "category": "release",
+      "invocation": "model",
+      "requiresSkills": [
+        "rhdh-release-schedule",
+        "rhdh-release-status"
+      ],
+      "requiresExternalSkills": []
+    },
+    {
       "name": "rhdh-smoke-tests",
       "category": "release",
       "invocation": "model",
