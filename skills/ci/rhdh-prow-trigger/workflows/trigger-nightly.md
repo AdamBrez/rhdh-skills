@@ -132,6 +132,10 @@ Run this command with `--dry-run` first. Use the printed execution command and
 request details in the write gate described in `../SKILL.md`. Supplement the
 resource impact and abort guidance with any known platform-specific details.
 
+For a GKE or OSD-GCP job, include the shared-cluster warning from Step 1 in the
+write gate, including when the user supplied the full job name and skipped
+Step 1.
+
 ```bash
 uv run scripts/trigger_nightly_job.py \
   --job <FULL_JOB_NAME> \
@@ -145,8 +149,14 @@ uv run scripts/trigger_nightly_job.py \
   [--repo <REPO>] \
   [--branch <BRANCH>] \
   [--send-alerts] \
+  [--skip-job-check] \
   [--dry-run]
 ```
+
+Live submission first checks that the job is on the owning repository's Prow
+configured-jobs page, retrying briefly, and stops if it cannot verify it. Use
+`--skip-job-check` only when that page is unavailable and the job name is
+confirmed, and state the skip in the write gate.
 
 After approval, run the preview's `execution_command`. If parameters change,
 generate a new preview before submitting.
@@ -162,14 +172,21 @@ To refresh an existing execution, use the GET-only status command:
 uv run scripts/trigger_nightly_job.py --status <EXECUTION_ID>
 ```
 
-The CLI also prints this command after submission. Repeating a trigger creates
-another ProwJob; use `--status` for follow-up, including when URL polling fails.
-Status cannot be combined with `--job`, `--dry-run`, or trigger overrides.
+The CLI prints this command after submission whenever Gangway returns an
+execution ID; without an ID it reports that `--status` is unavailable. Repeating
+a trigger creates another ProwJob; use `--status` for follow-up, including when
+URL polling fails. After submission the CLI retries status lookups that fail
+with a 5xx or network error a few times with backoff, and stops at once on
+other errors. Status cannot be combined with `--job`, `--dry-run`, trigger
+overrides, `--skip-job-check`, `--tag-filter`, or `--json`; its output is
+already JSON.
 
 Preserve the adapter's error diagnosis. Authentication failures name the setup
 route; permission failures require access review. An invalid request, unknown
 execution, rate limit, service failure, or network failure has its own guidance.
-Do not reinterpret every API failure as an invalid job name.
+Do not reinterpret every API failure as an invalid job name. Gangway answers an
+unknown execution ID with HTTP 500, not 404, so a status service failure may
+also mean a mistyped ID.
 
 Creation is not idempotent. If a POST times out, receives a server error, or
 returns an unreadable response, the job may already exist. Inspect the named
@@ -202,7 +219,7 @@ uv run scripts/trigger_nightly_job.py \
 
 ## Reference
 
-- Script flags: `-j/--job`, `-l/--list`, `-T/--list-tags`, `--status`, `--tag-filter`, `-I/--image-registry`, `-q/--image-repo`, `-t/--tag`, `--catalog-index-image`, `--chart-version`, `--playwright-version`, `-o/--org`, `-r/--repo`, `-b/--branch`, `-S/--send-alerts`, `-n/--dry-run`, `--json`
+- Script flags: `-j/--job`, `-l/--list`, `-T/--list-tags`, `--status`, `--tag-filter`, `-I/--image-registry`, `-q/--image-repo`, `-t/--tag`, `--catalog-index-image`, `--chart-version`, `--playwright-version`, `-o/--org`, `-r/--repo`, `-b/--branch`, `-S/--send-alerts`, `--skip-job-check`, `-n/--dry-run`, `--json`
 - API behavior: <https://docs.ci.openshift.org/how-tos/triggering-prowjobs-via-rest/>
 - Authentication and the adapter boundary: see `../SKILL.md`
 - RHDH jobs list: <https://prow.ci.openshift.org/configured-jobs/redhat-developer/rhdh>

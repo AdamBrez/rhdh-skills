@@ -48,7 +48,8 @@ Triggering a job is an external write; `--dry-run`, `--list`, `--list-tags`, and
   flags offline, then prints the adapter request without accessing credentials,
   creating configuration, or making network requests. It does not validate job,
   image, or chart existence. Live submission checks the owning repository's
-  configured job list and stops if membership cannot be verified.
+  configured job list and stops if membership cannot be verified;
+  `--skip-job-check` bypasses that check for emergencies only.
 - The preview carries the full command, parameters, resource impact, unknown
   cost, abort guidance, failure behavior, and verification steps. Use it in the
   write gate; get explicit approval before running without `--dry-run`.

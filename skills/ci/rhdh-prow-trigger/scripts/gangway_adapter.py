@@ -8,6 +8,7 @@ and returns credential-free response data.
 
 from __future__ import annotations
 
+import http.client
 import json
 import subprocess
 import urllib.error
@@ -21,9 +22,18 @@ GANGWAY_URL = "https://gangway-ci.apps.ci.l2s4.p1.openshiftapps.com/v1/execution
 class GangwayAdapterError(RuntimeError):
     """A credential-opaque failure from the Gangway adapter."""
 
-    def __init__(self, message: str, *, outcome_unknown: bool = False) -> None:
+    def __init__(
+        self, message: str, *, outcome_unknown: bool = False, status_code: int | None = None
+    ) -> None:
         super().__init__(message)
         self.outcome_unknown = outcome_unknown
+        # HTTP status of the failed request; None for network or response-parsing failures.
+        self.status_code = status_code
+
+    @property
+    def retryable(self) -> bool:
+        """True for failures a read may retry: network errors and 5xx responses."""
+        return self.status_code is None or self.status_code >= 500
 
 
 class GangwayAdapter:
@@ -83,22 +93,34 @@ class GangwayAdapter:
             elif error.code == 400:
                 guidance = "Invalid request. Check the job name, execution ID, and overrides."
             elif error.code == 404:
+                # Live Gangway answers 500, not 404, for unknown execution IDs, so a
+                # mistyped --status ID usually lands in the 5xx branch below.
                 guidance = (
                     "Execution not found. Check the execution ID."
                     if method == "GET"
                     else "Job or endpoint not found. Check the configured job list and Gangway URL."
                 )
+            elif error.code == 408:
+                guidance = "Gangway timed out. Check OpenShift CI service availability."
             elif error.code == 429:
                 guidance = "Rate limit exceeded. Wait before retrying."
             elif error.code >= 500:
-                guidance = "Gangway service failure. Check OpenShift CI service availability."
+                guidance = (
+                    "Gangway service failure, or an unknown execution ID. "
+                    "Check the execution ID and OpenShift CI service availability."
+                    if method == "GET"
+                    else "Gangway service failure. Check OpenShift CI service availability."
+                )
             else:
                 guidance = "Check the request and OpenShift CI service availability."
             raise GangwayAdapterError(
                 f"Gangway returned HTTP {error.code}. {guidance}",
                 outcome_unknown=method == "POST" and (error.code == 408 or error.code >= 500),
+                status_code=error.code,
             ) from error
-        except (urllib.error.URLError, OSError) as error:
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
+            # HTTPException covers IncompleteRead and BadStatusLine: the connection
+            # dropped mid-response, so a POST may already have created the job.
             raise GangwayAdapterError(
                 "Gangway network request failed. Check DNS, network/VPN connectivity, "
                 "and OpenShift CI service availability.",

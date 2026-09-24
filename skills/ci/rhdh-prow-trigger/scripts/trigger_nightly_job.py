@@ -43,6 +43,7 @@ Usage examples:
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -59,16 +60,18 @@ from gangway_adapter import GANGWAY_URL, GangwayAdapter, GangwayAdapterError
 # --- Constants ---
 CI_SERVER = "https://api.ci.l2s4.p1.openshiftapps.com:6443"
 
-REPOS = [
-    "redhat-developer/rhdh",
-    "redhat-developer/rhdh-plugin-export-overlays",
-]
+RHDH_REPO = "redhat-developer/rhdh"
+OVERLAY_REPO = "redhat-developer/rhdh-plugin-export-overlays"
+REPOS = [RHDH_REPO, OVERLAY_REPO]
 
 OVERLAY_JOB_PREFIX = "periodic-ci-redhat-developer-rhdh-plugin-export-overlays-"
+# The branch segment is anchored so sibling repositories such as rhdh-operator
+# cannot pass as rhdh jobs.
 NIGHTLY_JOB_PATTERN = re.compile(
     r"periodic-ci-redhat-developer-rhdh-(?:plugin-export-overlays-)?"
-    r"[a-zA-Z0-9][a-zA-Z0-9_.-]*-nightly"
+    r"(?:main|release-[0-9]+\.[0-9]+)-e2e-[a-zA-Z0-9][a-zA-Z0-9_.-]*-nightly"
 )
+# Keep in sync with the override arguments in build_parser(); a test enforces it.
 TRIGGER_OVERRIDES = (
     "image_registry",
     "image_repo",
@@ -108,7 +111,8 @@ def fetch_configured_jobs(repo: str) -> list[str]:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             html = resp.read().decode("utf-8")
-    except (urllib.error.URLError, OSError) as exc:
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as exc:
+        # ValueError covers UnicodeDecodeError from a proxy or captive-portal body.
         log_warn(f"Failed to fetch jobs from {url}: {exc}")
         return []
 
@@ -117,13 +121,23 @@ def fetch_configured_jobs(repo: str) -> list[str]:
     return sorted(set(matches))
 
 
+CONFIGURED_JOBS_ATTEMPTS = 3
+
+
 def ensure_configured_job(job: str) -> None:
     """Require membership in the owning repository's live job list before a POST."""
-    repo = REPOS[1] if job.startswith(OVERLAY_JOB_PREFIX) else REPOS[0]
-    jobs = fetch_configured_jobs(repo)
+    repo = OVERLAY_REPO if job.startswith(OVERLAY_JOB_PREFIX) else RHDH_REPO
+    jobs: list[str] = []
+    for attempt in range(CONFIGURED_JOBS_ATTEMPTS):
+        jobs = fetch_configured_jobs(repo)
+        if jobs:
+            break
+        if attempt < CONFIGURED_JOBS_ATTEMPTS - 1:
+            time.sleep(2**attempt)
     if not jobs:
         log_error(f"Cannot verify configured nightly jobs for {repo}; no job was submitted.")
         log_error("Check the configured-jobs page and network access, then retry --list.")
+        log_error("If the page is down and the job name is confirmed, rerun with --skip-job-check.")
         sys.exit(1)
     if job not in jobs:
         log_error(f"Job is not configured for {repo}: {job}")
@@ -467,29 +481,43 @@ def show_job_status(adapter: GangwayAdapter, job_id: str) -> None:
         log_warn("Job URL not yet available; repeat --status with this execution ID.")
 
 
+POLL_ATTEMPTS = 5
+
+
 def poll_job_status(adapter: GangwayAdapter, job_id: str) -> None:
-    """Poll the Gangway API for the job URL."""
+    """Poll the Gangway API for the job URL.
+
+    Gangway can answer 500 for an execution it has not registered yet, so 5xx
+    and network failures are retried with backoff (1s, 2s, 4s, 8s). Other
+    failures, such as 401 or 403, stop polling at once. ``--status`` covers
+    anything slower than this budget.
+    """
     print("", file=sys.stderr)
     log_info(f"Job ID: {job_id}")
     log_info(f"Refresh status: {command_line('--status', job_id)}")
     log_info("Waiting for Prow URL...")
 
     job_url = ""
-    for attempt in range(5):
+    last_error: GangwayAdapterError | None = None
+    for attempt in range(POLL_ATTEMPTS):
         print(".", end="", flush=True, file=sys.stderr)
         try:
             data = adapter.status(job_id)
+            last_error = None
             job_url = data.get("job_url", "")
             if job_url:
                 break
         except GangwayAdapterError as error:
-            print("", file=sys.stderr)
-            log_warn(f"Job was submitted, but status lookup failed: {error}")
-            return
-        if attempt < 4:
-            time.sleep(2)
+            last_error = error
+            if not error.retryable:
+                break
+        if attempt < POLL_ATTEMPTS - 1:
+            time.sleep(2**attempt)
 
     print("", file=sys.stderr)
+    if last_error is not None:
+        log_warn(f"Job was submitted, but status lookup failed: {last_error}")
+        return
     if job_url:
         log_info(f"Job URL: {job_url}")
     else:
@@ -497,7 +525,7 @@ def poll_job_status(adapter: GangwayAdapter, job_id: str) -> None:
 
 
 # --- CLI ---
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Trigger RHDH nightly ProwJobs via the OpenShift CI Gangway REST API.",
         allow_abbrev=False,
@@ -628,28 +656,54 @@ Examples:
         help="Print the request payload without executing.",
     )
     parser.add_argument(
+        "--skip-job-check",
+        action="store_true",
+        dest="skip_job_check",
+        help=(
+            "Submit without checking the Prow configured-jobs page. Emergency use only, "
+            "when that page is unavailable and the job name is confirmed."
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="json_output",
         help="Output structured JSON instead of human-readable text (for --list and --list-tags).",
     )
 
-    return parser.parse_args(argv)
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return build_parser().parse_args(argv)
 
 
 def validate_args(args: argparse.Namespace) -> None:
     """Validate parsed arguments."""
-    if args.dry_run and not args.job:
-        log_error("--dry-run requires --job.")
-        sys.exit(1)
-
     if args.status is not None:
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", args.status):
             log_error("--status requires an execution ID, not a URL or path.")
             sys.exit(1)
-        if any(getattr(args, name) for name in TRIGGER_OVERRIDES) or args.tag_filter:
-            log_error("--status cannot be combined with trigger overrides or --tag-filter.")
+        if (
+            any(getattr(args, name) for name in TRIGGER_OVERRIDES)
+            or args.dry_run
+            or args.tag_filter
+            or args.skip_job_check
+            or args.json_output
+        ):
+            log_error(
+                "--status cannot be combined with --dry-run, trigger overrides, "
+                "--skip-job-check, --tag-filter, or --json; its output is already JSON."
+            )
             sys.exit(1)
+
+    if args.dry_run and args.job is None:
+        log_error("--dry-run requires --job.")
+        sys.exit(1)
+
+    if args.skip_job_check and args.job is None:
+        log_error("--skip-job-check requires --job.")
+        sys.exit(1)
 
     if args.tag_filter and not args.list_tags:
         log_warn("--tag-filter is only used with --list-tags, ignoring.")
@@ -657,8 +711,9 @@ def validate_args(args: argparse.Namespace) -> None:
     if args.job is not None:
         if not NIGHTLY_JOB_PATTERN.fullmatch(args.job):
             log_error(
-                "Expected a periodic-ci-redhat-developer-rhdh-*-nightly or "
-                f"periodic-ci-redhat-developer-rhdh-plugin-export-overlays-*-nightly job, got: {args.job}"
+                "Expected a periodic-ci-redhat-developer-rhdh-{BRANCH}-e2e-*-nightly or "
+                "periodic-ci-redhat-developer-rhdh-plugin-export-overlays-{BRANCH}-e2e-*-nightly "
+                f"job with BRANCH main or release-N.N, got: {args.job}"
             )
             sys.exit(1)
 
@@ -678,6 +733,8 @@ def print_summary(args: argparse.Namespace, payload: dict) -> None:
 def print_dry_run(args: argparse.Namespace, payload: dict) -> None:
     """Print the proposed command, request, impact, and recovery without I/O."""
     arguments = ["--job", args.job]
+    if args.skip_job_check:
+        arguments.append("--skip-job-check")
     for name in TRIGGER_OVERRIDES:
         value = getattr(args, name)
         if value:
@@ -696,7 +753,11 @@ def print_dry_run(args: argparse.Namespace, payload: dict) -> None:
                 "payload": payload,
                 "validation": {
                     "job_name_and_flags": "passed",
-                    "configured_job": "unchecked offline; required before live submission",
+                    "configured_job": (
+                        "skipped by --skip-job-check"
+                        if args.skip_job_check
+                        else "unchecked offline; required before live submission"
+                    ),
                     "authentication": "unchecked",
                     "images_and_chart": "unchecked",
                 },
@@ -762,8 +823,11 @@ def main(argv: list[str] | None = None) -> None:
         print_dry_run(args, payload)
         return
 
-    ensure_configured_job(args.job)
     ensure_capability(kubeconfig)
+    if args.skip_job_check:
+        log_warn("Skipping the configured-jobs check (--skip-job-check).")
+    else:
+        ensure_configured_job(args.job)
     log_info(f"Command: {command_line(*argv)}")
     adapter = GangwayAdapter(kubeconfig)
     response = trigger_job(adapter, payload)
