@@ -23,17 +23,19 @@ class GangwayAdapterError(RuntimeError):
     """A credential-opaque failure from the Gangway adapter."""
 
     def __init__(
-        self, message: str, *, outcome_unknown: bool = False, status_code: int | None = None
+        self,
+        message: str,
+        *,
+        outcome_unknown: bool = False,
+        retryable: bool = False,
+        status_code: int | None = None,
     ) -> None:
         super().__init__(message)
         self.outcome_unknown = outcome_unknown
-        # HTTP status of the failed request; None for network or response-parsing failures.
+        # Only network failures and 5xx responses are worth another read;
+        # credential, client, and response-format failures are not.
+        self.retryable = retryable
         self.status_code = status_code
-
-    @property
-    def retryable(self) -> bool:
-        """True for failures a read may retry: network errors and 5xx responses."""
-        return self.status_code is None or self.status_code >= 500
 
 
 class GangwayAdapter:
@@ -116,6 +118,7 @@ class GangwayAdapter:
             raise GangwayAdapterError(
                 f"Gangway returned HTTP {error.code}. {guidance}",
                 outcome_unknown=method == "POST" and (error.code == 408 or error.code >= 500),
+                retryable=error.code >= 500,
                 status_code=error.code,
             ) from error
         except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
@@ -125,6 +128,7 @@ class GangwayAdapter:
                 "Gangway network request failed. Check DNS, network/VPN connectivity, "
                 "and OpenShift CI service availability.",
                 outcome_unknown=method == "POST",
+                retryable=True,
             ) from error
         except (json.JSONDecodeError, UnicodeDecodeError) as error:
             raise GangwayAdapterError(

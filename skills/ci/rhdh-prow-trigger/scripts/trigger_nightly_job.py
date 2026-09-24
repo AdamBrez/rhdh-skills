@@ -84,6 +84,8 @@ TRIGGER_OVERRIDES = (
     "branch",
     "send_alerts",
 )
+CONFIGURED_JOBS_ATTEMPTS = 3
+POLL_ATTEMPTS = 5
 
 
 # --- Logging ---
@@ -119,9 +121,6 @@ def fetch_configured_jobs(repo: str) -> list[str]:
     # Extract job names from embedded JSON: "name":"periodic-ci-...-nightly"
     matches = re.findall(r'"name"\s*:\s*"(periodic-ci-[^"]*-nightly)"', html)
     return sorted(set(matches))
-
-
-CONFIGURED_JOBS_ATTEMPTS = 3
 
 
 def ensure_configured_job(job: str) -> None:
@@ -479,9 +478,6 @@ def show_job_status(adapter: GangwayAdapter, job_id: str) -> None:
         log_info(f"Job URL: {response['job_url']}")
     else:
         log_warn("Job URL not yet available; repeat --status with this execution ID.")
-
-
-POLL_ATTEMPTS = 5
 
 
 def poll_job_status(adapter: GangwayAdapter, job_id: str) -> None:

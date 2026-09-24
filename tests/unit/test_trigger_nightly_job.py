@@ -357,10 +357,21 @@ def test_polling_failure_keeps_submitted_id_and_safe_refresh(sleeps, capsys):
     assert "/setup-rhdh-skills openshift-ci" in output
 
 
+def test_polling_stops_when_the_session_expires_after_submission(monkeypatch, sleeps):
+    monkeypatch.setattr(
+        ADAPTER.subprocess, "run", lambda *_a, **_kw: SimpleNamespace(returncode=1, stdout="")
+    )
+    requests = []
+    monkeypatch.setattr(ADAPTER.urllib.request, "urlopen", lambda *a, **_kw: requests.append(a))
+    NIGHTLY.poll_job_status(ADAPTER.GangwayAdapter("ci-kubeconfig"), "execution-123")
+    assert sleeps == []
+    assert requests == []
+
+
 def test_polling_retries_a_transient_server_error_with_backoff(sleeps, capsys):
     responses = [
-        ADAPTER.GangwayAdapterError("HTTP 500", status_code=500),
-        ADAPTER.GangwayAdapterError("network"),
+        ADAPTER.GangwayAdapterError("HTTP 500", retryable=True, status_code=500),
+        ADAPTER.GangwayAdapterError("network", retryable=True),
         {"job_url": "https://prow.example/run"},
     ]
 
@@ -382,7 +393,7 @@ def test_polling_stops_after_five_reads_with_bounded_backoff(sleeps, capsys):
 
     def status(job_id):
         calls.append(job_id)
-        raise ADAPTER.GangwayAdapterError("HTTP 500", status_code=500)
+        raise ADAPTER.GangwayAdapterError("HTTP 500", retryable=True, status_code=500)
 
     NIGHTLY.poll_job_status(SimpleNamespace(status=status), "execution-123")
     assert len(calls) == 5
