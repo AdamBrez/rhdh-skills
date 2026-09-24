@@ -17,6 +17,7 @@ import urllib.request
 from typing import Any
 
 GANGWAY_URL = "https://gangway-ci.apps.ci.l2s4.p1.openshiftapps.com/v1/executions"
+SETUP_GUIDANCE = "Run /setup-rhdh-skills openshift-ci, then retry."
 
 
 class GangwayAdapterError(RuntimeError):
@@ -28,14 +29,12 @@ class GangwayAdapterError(RuntimeError):
         *,
         outcome_unknown: bool = False,
         retryable: bool = False,
-        status_code: int | None = None,
     ) -> None:
         super().__init__(message)
         self.outcome_unknown = outcome_unknown
         # Only network failures and 5xx responses are worth another read;
         # credential, client, and response-format failures are not.
         self.retryable = retryable
-        self.status_code = status_code
 
 
 class GangwayAdapter:
@@ -57,14 +56,11 @@ class GangwayAdapter:
                 shell=False,
             )
         except OSError as error:
-            raise GangwayAdapterError(
-                "Cannot run oc. Run /setup-rhdh-skills openshift-ci, then retry."
-            ) from error
+            raise GangwayAdapterError(f"Cannot run oc. {SETUP_GUIDANCE}") from error
         token = result.stdout.strip()
         if result.returncode != 0 or not token:
             raise GangwayAdapterError(
-                "OpenShift CI authentication is missing or expired. "
-                "Run /setup-rhdh-skills openshift-ci, then retry."
+                f"OpenShift CI authentication is missing or expired. {SETUP_GUIDANCE}"
             )
         return token
 
@@ -72,6 +68,7 @@ class GangwayAdapter:
         self, url: str, *, method: str = "GET", payload: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        is_post = method == "POST"
         request = urllib.request.Request(
             url,
             data=data,
@@ -87,9 +84,7 @@ class GangwayAdapter:
                 body = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
             if error.code == 401:
-                guidance = (
-                    "Authentication was rejected. Run /setup-rhdh-skills openshift-ci, then retry."
-                )
+                guidance = f"Authentication was rejected. {SETUP_GUIDANCE}"
             elif error.code == 403:
                 guidance = "Permission denied. Ask an OpenShift CI administrator to check access."
             elif error.code == 400:
@@ -99,7 +94,7 @@ class GangwayAdapter:
                 # mistyped --status ID usually lands in the 5xx branch below.
                 guidance = (
                     "Execution not found. Check the execution ID."
-                    if method == "GET"
+                    if not is_post
                     else "Job or endpoint not found. Check the configured job list and Gangway URL."
                 )
             elif error.code == 408:
@@ -110,16 +105,15 @@ class GangwayAdapter:
                 guidance = (
                     "Gangway service failure, or an unknown execution ID. "
                     "Check the execution ID and OpenShift CI service availability."
-                    if method == "GET"
+                    if not is_post
                     else "Gangway service failure. Check OpenShift CI service availability."
                 )
             else:
                 guidance = "Check the request and OpenShift CI service availability."
             raise GangwayAdapterError(
                 f"Gangway returned HTTP {error.code}. {guidance}",
-                outcome_unknown=method == "POST" and (error.code == 408 or error.code >= 500),
+                outcome_unknown=is_post and (error.code == 408 or error.code >= 500),
                 retryable=error.code >= 500,
-                status_code=error.code,
             ) from error
         except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
             # HTTPException covers IncompleteRead and BadStatusLine: the connection
@@ -127,18 +121,18 @@ class GangwayAdapter:
             raise GangwayAdapterError(
                 "Gangway network request failed. Check DNS, network/VPN connectivity, "
                 "and OpenShift CI service availability.",
-                outcome_unknown=method == "POST",
+                outcome_unknown=is_post,
                 retryable=True,
             ) from error
         except (json.JSONDecodeError, UnicodeDecodeError) as error:
             raise GangwayAdapterError(
                 "Gangway returned an invalid JSON response. Check OpenShift CI service availability.",
-                outcome_unknown=method == "POST",
+                outcome_unknown=is_post,
             ) from error
         if not isinstance(body, dict):
             raise GangwayAdapterError(
                 "Gangway returned an unexpected response; expected a JSON object.",
-                outcome_unknown=method == "POST",
+                outcome_unknown=is_post,
             )
         return body
 

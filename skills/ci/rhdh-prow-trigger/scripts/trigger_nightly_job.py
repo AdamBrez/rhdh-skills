@@ -460,7 +460,7 @@ def trigger_job(adapter: GangwayAdapter, payload: dict) -> dict:
     return body
 
 
-def command_line(*arguments: str) -> str:
+def replay_command(*arguments: str) -> str:
     """Render a shell-safe command that also works outside the skill directory."""
     return shlex.join(["uv", "run", os.path.abspath(__file__), *arguments])
 
@@ -490,7 +490,7 @@ def poll_job_status(adapter: GangwayAdapter, job_id: str) -> None:
     """
     print("", file=sys.stderr)
     log_info(f"Job ID: {job_id}")
-    log_info(f"Refresh status: {command_line('--status', job_id)}")
+    log_info(f"Refresh status: {replay_command('--status', job_id)}")
     log_info("Waiting for Prow URL...")
 
     job_url = ""
@@ -745,7 +745,7 @@ def print_dry_run(args: argparse.Namespace, payload: dict) -> None:
                 "operation": "gangway.execution.create",
                 "target": GANGWAY_URL,
                 "authentication": "native oc kubeconfig (redacted)",
-                "execution_command": command_line(*arguments),
+                "execution_command": replay_command(*arguments),
                 "payload": payload,
                 "validation": {
                     "job_name_and_flags": "passed",
@@ -775,7 +775,7 @@ def print_dry_run(args: argparse.Namespace, payload: dict) -> None:
                 ),
                 "verification": (
                     "Report the API response and execution ID/URL. Read the existing execution with "
-                    f"{command_line('--status', '<EXECUTION_ID>')}. "
+                    f"{replay_command('--status', '<EXECUTION_ID>')}. "
                     "If neither ID nor URL is returned, report that verification is incomplete."
                 ),
             },
@@ -824,7 +824,7 @@ def main(argv: list[str] | None = None) -> None:
         log_warn("Skipping the configured-jobs check (--skip-job-check).")
     else:
         ensure_configured_job(args.job)
-    log_info(f"Command: {command_line(*argv)}")
+    log_info(f"Command: {replay_command(*argv)}")
     adapter = GangwayAdapter(kubeconfig)
     response = trigger_job(adapter, payload)
 

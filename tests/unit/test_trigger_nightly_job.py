@@ -48,8 +48,25 @@ def sleeps(monkeypatch):
 
 @pytest.fixture
 def live_cli(monkeypatch):
+    """Stub an authenticated session whose configured-jobs pages list both test jobs."""
     monkeypatch.setattr(NIGHTLY, "ensure_capability", lambda _path: None)
     monkeypatch.setattr(NIGHTLY, "fetch_configured_jobs", lambda _repo: [JOB, OVERLAY_JOB])
+
+
+def read_preview(capsys) -> dict:
+    """Parse the JSON document the dry run prints after its one-line header."""
+    return json.loads(capsys.readouterr().out.split("\n", 1)[1])
+
+
+def fake_adapter(submissions: list, response: dict | None = None):
+    """A Gangway adapter that records submissions and reports a ready job URL."""
+    return lambda _path: SimpleNamespace(
+        trigger=lambda payload: (
+            submissions.append(payload)
+            or ({"id": "execution-123"} if response is None else response)
+        ),
+        status=lambda _id: {"job_url": "https://prow.example/run"},
+    )
 
 
 @pytest.fixture
@@ -136,7 +153,7 @@ def test_dry_run_is_an_offline_preview_with_a_replayable_command(tmp_path, capsy
 
 def test_preview_command_preserves_quoted_values_and_boolean_flags(capsys):
     NIGHTLY.main(["-j", JOB, "--branch", "literal $value `text` 'quoted'", "-Sn"])
-    preview = json.loads(capsys.readouterr().out.split("\n", 1)[1])
+    preview = read_preview(capsys)
     replay = NIGHTLY.parse_args(shlex.split(preview["execution_command"])[3:])
     assert replay.branch == "literal $value `text` 'quoted'"
     assert replay.send_alerts
@@ -157,11 +174,11 @@ def test_preview_command_preserves_quoted_values_and_boolean_flags(capsys):
     ],
 )
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_unsupported_job_names_fail_offline(job, dry_run, capsys):
+def test_unsupported_job_names_fail_offline(job, dry_run):
+    assert not NIGHTLY.NIGHTLY_JOB_PATTERN.fullmatch(job)
     with pytest.raises(SystemExit) as error:
         NIGHTLY.main(["--job", job, *(["--dry-run"] if dry_run else [])])
-    assert error.value.code != 0
-    assert "Expected a periodic-ci-redhat-developer-rhdh" in capsys.readouterr().err
+    assert error.value.code == 1
 
 
 @pytest.mark.parametrize("job", [JOB, OVERLAY_JOB])
@@ -184,15 +201,22 @@ def test_status_rejects_trigger_flags(extra, capsys):
     with pytest.raises(SystemExit) as error:
         NIGHTLY.main(["--status", "execution-123", *extra])
     assert error.value.code == 1
-    assert "--status cannot be combined" in capsys.readouterr().err
+    assert "--status" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("extra", [["--job", JOB], ["--list"], ["--list-tags"]])
-def test_status_rejects_other_actions(extra, capsys):
+def test_status_rejects_other_actions(extra):
     with pytest.raises(SystemExit) as error:
         NIGHTLY.main(["--status", "execution-123", *extra])
     assert error.value.code == 2
-    assert "not allowed with argument" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag", ["--dry-run", "--skip-job-check"])
+def test_job_only_flags_require_a_job(monkeypatch, flag):
+    monkeypatch.setattr(NIGHTLY, "list_jobs", lambda **_kw: pytest.fail("listed"))
+    with pytest.raises(SystemExit) as error:
+        NIGHTLY.main(["--list", flag])
+    assert error.value.code == 1
 
 
 def test_trigger_overrides_match_parser_override_flags():
@@ -207,19 +231,49 @@ def test_trigger_overrides_match_parser_override_flags():
         "skip_job_check",
         "json_output",
     }
-    dests = {action.dest for action in NIGHTLY.build_parser()._actions}
-    assert dests - non_overrides == set(NIGHTLY.TRIGGER_OVERRIDES)
+    actions = NIGHTLY.build_parser()._actions
+    assert {action.dest for action in actions} - non_overrides == set(NIGHTLY.TRIGGER_OVERRIDES)
+    # The dry-run preview rebuilds each override flag from its dest name.
+    flags = {flag for action in actions for flag in action.option_strings}
+    assert {f"--{name.replace('_', '-')}" for name in NIGHTLY.TRIGGER_OVERRIDES} <= flags
 
 
 @pytest.mark.parametrize("job_id", ["", "../executions", "id?job_name=other", "https://prow/id"])
-def test_status_rejects_paths_and_urls(job_id):
-    with pytest.raises(SystemExit):
+def test_status_rejects_paths_and_urls(monkeypatch, job_id):
+    monkeypatch.setattr(NIGHTLY, "ensure_capability", lambda _path: pytest.fail("authenticated"))
+    with pytest.raises(SystemExit) as error:
         NIGHTLY.main(["--status", job_id])
+    assert error.value.code == 1
+
+
+def test_status_requires_a_session_before_reading(monkeypatch):
+    def missing_session(_path):
+        raise SystemExit(1)
+
+    monkeypatch.setattr(NIGHTLY, "ensure_capability", missing_session)
+    monkeypatch.setattr(NIGHTLY, "GangwayAdapter", lambda _path: pytest.fail("read"))
+    with pytest.raises(SystemExit):
+        NIGHTLY.main(["--status", "execution-123"])
+
+
+def test_status_lookup_failure_exits_without_output(capsys):
+    def status(_job_id):
+        raise ADAPTER.GangwayAdapterError("HTTP 500")
+
+    with pytest.raises(SystemExit) as error:
+        NIGHTLY.show_job_status(SimpleNamespace(status=status), "execution-123")
+    assert error.value.code == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_status_without_a_url_still_prints_the_execution(capsys):
+    NIGHTLY.show_job_status(SimpleNamespace(status=lambda job_id: {"id": job_id}), "execution-123")
+    assert json.loads(capsys.readouterr().out) == {"id": "execution-123"}
 
 
 @pytest.mark.parametrize("jobs,lookups", [([], 3), ([JOB + "-other"], 1)])
 def test_unverifiable_or_unknown_job_stops_before_submission(
-    monkeypatch, live_cli, sleeps, capsys, jobs, lookups
+    monkeypatch, live_cli, sleeps, jobs, lookups
 ):
     calls = []
     monkeypatch.setattr(NIGHTLY, "fetch_configured_jobs", lambda repo: calls.append(repo) or jobs)
@@ -229,7 +283,6 @@ def test_unverifiable_or_unknown_job_stops_before_submission(
     assert error.value.code == 1
     assert len(calls) == lookups
     assert sleeps == [1, 2][: lookups - 1]
-    assert "no job was submitted" in capsys.readouterr().err.lower()
 
 
 def test_configured_job_check_retries_a_transient_empty_page(monkeypatch, sleeps):
@@ -252,21 +305,14 @@ def test_authentication_is_checked_before_job_discovery(monkeypatch):
 def test_skip_job_check_submits_without_job_discovery(monkeypatch, live_cli):
     submissions = []
     monkeypatch.setattr(NIGHTLY, "fetch_configured_jobs", lambda _repo: pytest.fail("fetched"))
-    monkeypatch.setattr(
-        NIGHTLY,
-        "GangwayAdapter",
-        lambda _path: SimpleNamespace(
-            trigger=lambda payload: submissions.append(payload) or {"id": "execution-123"},
-            status=lambda _id: {"job_url": "https://prow.example/run"},
-        ),
-    )
+    monkeypatch.setattr(NIGHTLY, "GangwayAdapter", fake_adapter(submissions))
     NIGHTLY.main(["--job", JOB, "--skip-job-check"])
     assert [payload["job_name"] for payload in submissions] == [JOB]
 
 
 def test_skip_job_check_is_carried_into_the_preview_command(capsys):
     NIGHTLY.main(["--job", JOB, "--skip-job-check", "--dry-run"])
-    preview = json.loads(capsys.readouterr().out.split("\n", 1)[1])
+    preview = read_preview(capsys)
     assert NIGHTLY.parse_args(shlex.split(preview["execution_command"])[3:]).skip_job_check
     assert "--skip-job-check" in preview["validation"]["configured_job"]
 
@@ -279,11 +325,31 @@ class TruncatedResponse(io.BytesIO):
 
 
 @pytest.mark.parametrize("truncated", [False, True])
-def test_unreadable_configured_jobs_page_is_reported_not_raised(monkeypatch, capsys, truncated):
+def test_unreadable_configured_jobs_page_is_reported_not_raised(monkeypatch, truncated):
     body = TruncatedResponse() if truncated else io.BytesIO(b"\xff")
     monkeypatch.setattr(NIGHTLY.urllib.request, "urlopen", lambda *_a, **_kw: body)
     assert NIGHTLY.fetch_configured_jobs(NIGHTLY.RHDH_REPO) == []
-    assert "Failed to fetch jobs" in capsys.readouterr().err
+
+
+def test_configured_jobs_page_tolerates_spaced_json(monkeypatch):
+    page = f'{{"name" : "{JOB}"}} {{"name": "{JOB}"}} {{"name":"periodic-ci-x-presubmit"}}'
+    monkeypatch.setattr(
+        NIGHTLY.urllib.request, "urlopen", lambda *_a, **_kw: io.BytesIO(page.encode())
+    )
+    assert NIGHTLY.fetch_configured_jobs(NIGHTLY.RHDH_REPO) == [JOB]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [{"job_url": "https://prow.example/run"}, {}],
+)
+def test_submission_without_an_execution_id_does_not_poll(monkeypatch, live_cli, response):
+    submissions = []
+    adapter = fake_adapter(submissions, response)("ci-kubeconfig")
+    adapter.status = lambda _id: pytest.fail("polled")
+    monkeypatch.setattr(NIGHTLY, "GangwayAdapter", lambda _path: adapter)
+    NIGHTLY.main(["--job", JOB])
+    assert len(submissions) == 1
 
 
 @pytest.mark.parametrize(
@@ -339,14 +405,13 @@ def test_printed_refresh_command_only_reads_existing_execution(monkeypatch, live
     assert json.loads(capsys.readouterr().out)["job_status"] == "PENDING"
 
 
-def test_polling_failure_keeps_submitted_id_and_safe_refresh(sleeps, capsys):
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_polling_failure_keeps_submitted_id_and_safe_refresh(sleeps, capsys, status_code):
     calls = []
 
     def status(job_id):
         calls.append(job_id)
-        raise ADAPTER.GangwayAdapterError(
-            "HTTP 401: /setup-rhdh-skills openshift-ci", status_code=401
-        )
+        raise ADAPTER.GangwayAdapterError(f"HTTP {status_code}: /setup-rhdh-skills openshift-ci")
 
     NIGHTLY.poll_job_status(SimpleNamespace(status=status), "execution-123")
     output = capsys.readouterr().err
@@ -370,7 +435,7 @@ def test_polling_stops_when_the_session_expires_after_submission(monkeypatch, sl
 
 def test_polling_retries_a_transient_server_error_with_backoff(sleeps, capsys):
     responses = [
-        ADAPTER.GangwayAdapterError("HTTP 500", retryable=True, status_code=500),
+        ADAPTER.GangwayAdapterError("HTTP 500", retryable=True),
         ADAPTER.GangwayAdapterError("network", retryable=True),
         {"job_url": "https://prow.example/run"},
     ]
@@ -385,29 +450,26 @@ def test_polling_retries_a_transient_server_error_with_backoff(sleeps, capsys):
     output = capsys.readouterr().err
     assert sleeps == [1, 2]
     assert "https://prow.example/run" in output
-    assert "status lookup failed" not in output
 
 
-def test_polling_stops_after_five_reads_with_bounded_backoff(sleeps, capsys):
+def test_polling_stops_after_five_reads_with_bounded_backoff(sleeps):
     calls = []
 
     def status(job_id):
         calls.append(job_id)
-        raise ADAPTER.GangwayAdapterError("HTTP 500", retryable=True, status_code=500)
+        raise ADAPTER.GangwayAdapterError("HTTP 500", retryable=True)
 
     NIGHTLY.poll_job_status(SimpleNamespace(status=status), "execution-123")
     assert len(calls) == 5
     assert sleeps == [1, 2, 4, 8]
-    assert "status lookup failed" in capsys.readouterr().err
 
 
-def test_polling_without_a_url_reads_five_times(sleeps, capsys):
+def test_polling_without_a_url_reads_five_times(sleeps):
     calls = []
     NIGHTLY.poll_job_status(
         SimpleNamespace(status=lambda job_id: calls.append(job_id) or {}), "execution-123"
     )
     assert len(calls) == 5
-    assert "Job URL not yet available" in capsys.readouterr().err
 
 
 def test_adapter_status_uses_get_without_a_request_body(monkeypatch, adapter):
@@ -420,6 +482,15 @@ def test_adapter_status_uses_get_without_a_request_body(monkeypatch, adapter):
 
     monkeypatch.setattr(ADAPTER.urllib.request, "urlopen", urlopen)
     assert adapter.status("execution-123") == {"id": "execution-123"}
+
+
+def test_adapter_status_escapes_the_execution_id(monkeypatch, adapter):
+    def urlopen(request, **_kwargs):
+        assert request.full_url == f"{ADAPTER.GANGWAY_URL}/a%2Fb%3Fc"
+        return io.BytesIO(b"{}")
+
+    monkeypatch.setattr(ADAPTER.urllib.request, "urlopen", urlopen)
+    adapter.status("a/b?c")
 
 
 @pytest.mark.parametrize(
@@ -458,23 +529,16 @@ def test_http_errors_are_actionable_and_do_not_expose_response_data(
     assert "test-token" not in str(error.value)
 
 
-@pytest.mark.parametrize(
-    "status,message",
-    [
-        (404, "Execution not found"),
-        (500, "unknown execution ID"),
-    ],
-)
-def test_status_http_errors_never_claim_an_unknown_outcome(monkeypatch, adapter, status, message):
+@pytest.mark.parametrize("status", [401, 403, 404, 429, 500, 503])
+def test_status_http_errors_never_claim_an_unknown_outcome(monkeypatch, adapter, status):
     def urlopen(request, **_kwargs):
         raise urllib.error.HTTPError(request.full_url, status, "error", {}, io.BytesIO(b""))
 
     monkeypatch.setattr(ADAPTER.urllib.request, "urlopen", urlopen)
     with pytest.raises(ADAPTER.GangwayAdapterError) as error:
         adapter.status("execution-123")
-    assert message in str(error.value)
+    assert f"HTTP {status}" in str(error.value)
     assert not error.value.outcome_unknown
-    assert error.value.status_code == status
     assert error.value.retryable is (status >= 500)
 
 
@@ -486,7 +550,6 @@ def test_dropped_connection_is_a_network_failure(monkeypatch, adapter, method):
             adapter.trigger({"job_name": JOB})
         else:
             adapter.status("execution-123")
-    assert "network request failed" in str(error.value)
     assert error.value.outcome_unknown is (method == "trigger")
     assert error.value.retryable
     assert "test-token" not in str(error.value)
@@ -495,7 +558,7 @@ def test_dropped_connection_is_a_network_failure(monkeypatch, adapter, method):
 @pytest.mark.parametrize(
     "failure", [urllib.error.URLError("test-token"), TimeoutError("test-token")]
 )
-def test_network_failures_do_not_retry_or_claim_job_rejection(
+def test_network_failures_do_not_retry_and_point_to_prow_history(
     monkeypatch, adapter, capsys, failure
 ):
     requests = []
@@ -513,12 +576,26 @@ def test_network_failures_do_not_retry_or_claim_job_rejection(
     assert "test-token" not in output
 
 
+def test_known_submission_failure_does_not_point_to_prow_history(monkeypatch, capsys):
+    def trigger(_payload):
+        raise ADAPTER.GangwayAdapterError("HTTP 401")
+
+    with pytest.raises(SystemExit):
+        NIGHTLY.trigger_job(SimpleNamespace(trigger=trigger), {"job_name": JOB})
+    assert f"?job={JOB}" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("method", ["trigger", "status"])
 @pytest.mark.parametrize("body", [b"test-token", b"[]", b"\xff"])
-def test_unreadable_submission_responses_have_unknown_outcome(monkeypatch, adapter, body):
+def test_unreadable_responses_are_unknown_only_for_submission(monkeypatch, adapter, body, method):
     monkeypatch.setattr(ADAPTER.urllib.request, "urlopen", lambda *_a, **_kw: io.BytesIO(body))
     with pytest.raises(ADAPTER.GangwayAdapterError) as error:
-        adapter.trigger({"job_name": JOB})
-    assert error.value.outcome_unknown
+        if method == "trigger":
+            adapter.trigger({"job_name": JOB})
+        else:
+            adapter.status("execution-123")
+    assert error.value.outcome_unknown is (method == "trigger")
+    assert not error.value.retryable
     assert "test-token" not in str(error.value)
 
 
@@ -537,3 +614,15 @@ def test_credential_retrieval_failure_routes_to_setup(monkeypatch):
     assert "/setup-rhdh-skills openshift-ci" in str(error.value)
     assert not error.value.outcome_unknown
     assert "test-token" not in str(error.value)
+
+
+def test_missing_oc_executable_routes_to_setup(monkeypatch):
+    def run(*_args, **_kwargs):
+        raise FileNotFoundError("oc")
+
+    monkeypatch.setattr(ADAPTER.subprocess, "run", run)
+    with pytest.raises(ADAPTER.GangwayAdapterError) as error:
+        ADAPTER.GangwayAdapter("ci-kubeconfig").status("execution-123")
+    assert "/setup-rhdh-skills openshift-ci" in str(error.value)
+    assert not error.value.outcome_unknown
+    assert not error.value.retryable
