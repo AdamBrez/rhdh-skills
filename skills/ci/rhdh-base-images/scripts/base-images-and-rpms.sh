@@ -18,6 +18,7 @@ SKIP_RPM=0
 DRY_RUN=0
 ANALYZE=0
 ALLOW_DIRTY=0
+CATALOG_BRANCH_FOR=""
 BASE_IMAGE_ARGS=(--pr --no-push)
 
 GITLAB_SCRIPTS_BASE="https://gitlab.cee.redhat.com/rhidp/rhdh/-/raw"
@@ -45,6 +46,7 @@ Repo selection (default: all three under --parent-dir, or current directory if i
 
 Workflow:
   --analyze                 Read-only scan (current vs latest tags, UBI skew); no -b required
+  --catalog-branch-for B    Print plugin-catalog git branch for GitHub selector B and exit
   --skip-base               Skip updateBaseImages.sh
   --skip-rpm                Skip rpm-lockfile-prototype
   --dirty                   Pass --dirty to updateBaseImages.sh
@@ -54,6 +56,7 @@ Workflow:
 
 Examples:
   base-images-and-rpms.sh --analyze --parent-dir ~/RHDH
+  base-images-and-rpms.sh --catalog-branch-for release-1.10
   base-images-and-rpms.sh -b release-1.10 --parent-dir ~/RHDH/
   base-images-and-rpms.sh -b main \
     --update-base-images-script ~/src/rhdh/build/scripts/updateBaseImages.sh \
@@ -73,6 +76,48 @@ log() {
 
 warn() {
     echo "[WARN] $*" >&2
+}
+
+SKILL_MD_URL="https://github.com/redhat-developer/rhdh-skills/blob/main/skills/ci/rhdh-base-images/SKILL.md"
+
+# Default bot PR body for skill-driven updates (agent or CI). Callers may
+# pre-set CREATE_PR_BODY to override; weekly leaves it unset and comments
+# GitLab provenance separately.
+default_create_pr_body() {
+    local branch="${1:-main}"
+    cat <<EOF
+## Summary
+
+Automated base-image maintenance for branch \`${branch}\`.
+
+This PR was opened by the **rhdh-base-images** skill
+(\`base-images-and-rpms.sh\`), a **governed, AI-assisted automation pipeline**
+that keeps UBI \`FROM\` bumps in lockstep with \`rpms.lock.yaml\`, Node headers
+(\`.nvmrc\` / \`node-v*-headers.tar.gz\`), operator \`go.mod\` (main),
+plugin-catalog builder pins, and overlays \`versions.json\` \`node\` when those
+checkouts are in scope.
+
+## Agentic SDLC
+
+This change is part of an **agentic SDLC** path for platform hygiene: an
+**AI coding skill** (\`rhdh-base-images\`) encodes the playbook that humans
+previously ran by hand, so dependency drift (base image → RPM → Node/Go) is
+closed in **one automergeable PR** instead of staggered bot PRs. The skill is
+reviewed and executed with explicit checkouts — **governed, AI-assisted
+automation** that augments the software delivery lifecycle with repeatable,
+auditable automation rather than replacing human merge judgment
+(\`lgtm\` / \`approved\` still apply).
+
+See the skill README: ${SKILL_MD_URL}
+EOF
+}
+
+ensure_create_pr_body() {
+    local branch="${1:-main}"
+    if [[ -z "${CREATE_PR_BODY:-}" ]]; then
+        CREATE_PR_BODY=$(default_create_pr_body "${branch}")
+        export CREATE_PR_BODY
+    fi
 }
 
 validate_branch() {
@@ -429,7 +474,7 @@ commit_push_paths() {
             --base "${branch}" \
             --head "${push_branch}" \
             --title "chore: update RPM lockfile in branch (${branch}) [skip-build]" \
-            --body "Automated RPM lockfile refresh from base-images-and-rpms.sh." \
+            --body "${CREATE_PR_BODY}" \
             2>/dev/null \
             || warn "Could not open RPM lockfile PR for ${push_branch}"
     fi
@@ -846,6 +891,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run) DRY_RUN=1; shift ;;
         --analyze) ANALYZE=1; shift ;;
+        --catalog-branch-for) CATALOG_BRANCH_FOR="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
         -*) die "Unknown option: $1 (try --help)" ;;
@@ -862,6 +908,12 @@ while [[ $# -gt 0 ]]; do
     REPO_DIRS+=("$1")
     shift
 done
+
+# Pure mapper for callers (e.g. weekly-maintenance) — no repo checkouts required.
+if [[ -n "${CATALOG_BRANCH_FOR}" ]]; then
+    catalog_git_branch_for "${CATALOG_BRANCH_FOR}"
+    exit 0
+fi
 
 if [[ ${ANALYZE} -eq 0 ]]; then
     [[ -n "${BRANCH}" ]] || { usage; exit 1; }
@@ -886,6 +938,10 @@ if [[ ${ANALYZE} -eq 1 ]]; then
     run_analyze "${SCRIPTS_BRANCH}"
     exit 0
 fi
+
+# Export default agentic PR body for createPR.sh / gh pr create unless the caller
+# already set CREATE_PR_BODY (weekly leaves it unset and comments provenance).
+ensure_create_pr_body "${BRANCH}"
 
 if [[ ${SKIP_BASE} -eq 0 ]]; then
     ensure_tools jq skopeo curl
