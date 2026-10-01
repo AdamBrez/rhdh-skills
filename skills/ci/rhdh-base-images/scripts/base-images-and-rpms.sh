@@ -18,6 +18,7 @@ SKIP_RPM=0
 DRY_RUN=0
 ANALYZE=0
 ALLOW_DIRTY=0
+CATALOG_BRANCH_FOR=""
 BASE_IMAGE_ARGS=(--pr --no-push)
 
 GITLAB_SCRIPTS_BASE="https://gitlab.cee.redhat.com/rhidp/rhdh/-/raw"
@@ -45,16 +46,17 @@ Repo selection (default: all three under --parent-dir, or current directory if i
 
 Workflow:
   --analyze                 Read-only scan (current vs latest tags, UBI skew); no -b required
+  --catalog-branch-for B    Print plugin-catalog git branch for GitHub selector B and exit
   --skip-base               Skip updateBaseImages.sh
   --skip-rpm                Skip rpm-lockfile-prototype
   --dirty                   Pass --dirty to updateBaseImages.sh
   --push                    Allow updateBaseImages.sh to push (default: --pr --no-push)
   --no-pr                   Attempt direct push instead of opening a PR
   --dry-run                 Print actions without changing files
-  --analyze                 Read-only scan (current vs latest tags, UBI skew); no -b required
 
 Examples:
   base-images-and-rpms.sh --analyze --parent-dir ~/RHDH
+  base-images-and-rpms.sh --catalog-branch-for release-1.10
   base-images-and-rpms.sh -b release-1.10 --parent-dir ~/RHDH/
   base-images-and-rpms.sh -b main \
     --update-base-images-script ~/src/rhdh/build/scripts/updateBaseImages.sh \
@@ -889,6 +891,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run) DRY_RUN=1; shift ;;
         --analyze) ANALYZE=1; shift ;;
+        --catalog-branch-for) CATALOG_BRANCH_FOR="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
         -*) die "Unknown option: $1 (try --help)" ;;
@@ -905,6 +908,12 @@ while [[ $# -gt 0 ]]; do
     REPO_DIRS+=("$1")
     shift
 done
+
+# Pure mapper for callers (e.g. weekly-maintenance) — no repo checkouts required.
+if [[ -n "${CATALOG_BRANCH_FOR}" ]]; then
+    catalog_git_branch_for "${CATALOG_BRANCH_FOR}"
+    exit 0
+fi
 
 if [[ ${ANALYZE} -eq 0 ]]; then
     [[ -n "${BRANCH}" ]] || { usage; exit 1; }
