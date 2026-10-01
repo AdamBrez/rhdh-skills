@@ -18,7 +18,6 @@ SKIP_RPM=0
 DRY_RUN=0
 ANALYZE=0
 ALLOW_DIRTY=0
-PRINT_PR_BODY=0
 BASE_IMAGE_ARGS=(--pr --no-push)
 
 GITLAB_SCRIPTS_BASE="https://gitlab.cee.redhat.com/rhidp/rhdh/-/raw"
@@ -52,13 +51,11 @@ Workflow:
   --push                    Allow updateBaseImages.sh to push (default: --pr --no-push)
   --no-pr                   Attempt direct push instead of opening a PR
   --dry-run                 Print actions without changing files
-  --print-pr-body           Print the default CREATE_PR_BODY for -b BRANCH and exit
   --analyze                 Read-only scan (current vs latest tags, UBI skew); no -b required
 
 Examples:
   base-images-and-rpms.sh --analyze --parent-dir ~/RHDH
   base-images-and-rpms.sh -b release-1.10 --parent-dir ~/RHDH/
-  base-images-and-rpms.sh --print-pr-body -b main
   base-images-and-rpms.sh -b main \
     --update-base-images-script ~/src/rhdh/build/scripts/updateBaseImages.sh \
     ~/RHDH/rhdh ~/RHDH/rhdh-operator ~/RHDH/rhdh-must-gather \
@@ -892,7 +889,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run) DRY_RUN=1; shift ;;
         --analyze) ANALYZE=1; shift ;;
-        --print-pr-body) PRINT_PR_BODY=1; shift ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
         -*) die "Unknown option: $1 (try --help)" ;;
@@ -910,7 +906,7 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-if [[ ${ANALYZE} -eq 0 && ${PRINT_PR_BODY} -eq 0 ]]; then
+if [[ ${ANALYZE} -eq 0 ]]; then
     [[ -n "${BRANCH}" ]] || { usage; exit 1; }
     validate_branch "${BRANCH}"
 elif [[ -z "${BRANCH}" ]]; then
@@ -918,15 +914,6 @@ elif [[ -z "${BRANCH}" ]]; then
 else
     validate_branch "${BRANCH}"
 fi
-
-if [[ ${PRINT_PR_BODY} -eq 1 ]]; then
-    default_create_pr_body "${BRANCH}"
-    exit 0
-fi
-
-# Export default agentic PR body for createPR.sh / gh pr create unless the caller
-# already set CREATE_PR_BODY (e.g. weekly-maintenance appending GitLab provenance).
-ensure_create_pr_body "${BRANCH}"
 
 if [[ ${#REPO_DIRS[@]} -eq 0 ]]; then
     if is_git_checkout "." && [[ "$(detect_repo_kind "$(pwd)")" != "unknown" ]]; then
@@ -942,6 +929,10 @@ if [[ ${ANALYZE} -eq 1 ]]; then
     run_analyze "${SCRIPTS_BRANCH}"
     exit 0
 fi
+
+# Export default agentic PR body for createPR.sh / gh pr create unless the caller
+# already set CREATE_PR_BODY (rarely needed; weekly leaves it unset and comments provenance).
+ensure_create_pr_body "${BRANCH}"
 
 if [[ ${SKIP_BASE} -eq 0 ]]; then
     ensure_tools jq skopeo curl
