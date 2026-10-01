@@ -78,8 +78,9 @@ warn() {
 
 SKILL_MD_URL="https://github.com/redhat-developer/rhdh-skills/blob/main/skills/ci/rhdh-base-images/SKILL.md"
 
-# Default bot PR body for skill-driven updates (agent or CI). Callers such as
-# weekly-maintenance may pre-set CREATE_PR_BODY (e.g. to append GitLab provenance).
+# Default bot PR body for skill-driven updates (agent or CI). Callers may
+# pre-set CREATE_PR_BODY to override; weekly leaves it unset and comments
+# GitLab provenance separately.
 default_create_pr_body() {
     local branch="${1:-main}"
     cat <<EOF
@@ -930,7 +931,7 @@ if [[ ${ANALYZE} -eq 1 ]]; then
 fi
 
 # Export default agentic PR body for createPR.sh / gh pr create unless the caller
-# already set CREATE_PR_BODY (rarely needed; weekly leaves it unset and comments provenance).
+# already set CREATE_PR_BODY (weekly leaves it unset and comments provenance).
 ensure_create_pr_body "${BRANCH}"
 
 if [[ ${SKIP_BASE} -eq 0 ]]; then
