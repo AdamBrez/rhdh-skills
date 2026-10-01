@@ -467,7 +467,6 @@ commit_push_paths() {
     if [[ "${push_branch}" == chore/automated-update-rpm-lockfile/* ]] \
         && command -v gh >/dev/null 2>&1 \
         && ! gh pr list --head "${push_branch}" --state open --json number -q '.[0].number' 2>/dev/null | grep -q .; then
-        ensure_create_pr_body "${branch}"
         gh pr create \
             --base "${branch}" \
             --head "${push_branch}" \
