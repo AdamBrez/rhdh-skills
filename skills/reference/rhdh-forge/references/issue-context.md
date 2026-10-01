@@ -121,7 +121,7 @@ operation afterwards. `/mutation-gate` owns that rule.
 gh issue comment <number> --repo <owner/repo> --body "<exact body>"
 gh issue edit <number> --repo <owner/repo> --add-label "<label>"
 gh issue edit <number> --repo <owner/repo> --remove-label "<label>"
-gh issue edit <number> --repo <owner/repo> --body-file <path>
+gh issue edit <number> --repo <owner/repo> --body-file "<path>"
 ```
 
 An issue body is multi-line Markdown. Write it to an absolute readable file in
