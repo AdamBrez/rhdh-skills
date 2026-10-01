@@ -84,17 +84,11 @@ SKILL_MD_URL="https://github.com/redhat-developer/rhdh-skills/blob/main/skills/c
 # Default bot PR body for skill-driven updates (agent or CI). Callers such as
 # weekly-maintenance may pre-set CREATE_PR_BODY (e.g. to append GitLab provenance).
 default_create_pr_body() {
-    local branch="${1:-}"
-    local branch_line=""
-    if [[ -n "${branch}" ]]; then
-        branch_line="Automated base-image maintenance for branch \`${branch}\`."
-    else
-        branch_line="Automated base-image maintenance."
-    fi
+    local branch="${1:-main}"
     cat <<EOF
 ## Summary
 
-${branch_line}
+Automated base-image maintenance for branch \`${branch}\`.
 
 This PR was opened by the **rhdh-base-images** skill
 (\`base-images-and-rpms.sh\`), a **governed, AI-assisted automation pipeline**
@@ -119,7 +113,7 @@ EOF
 }
 
 ensure_create_pr_body() {
-    local branch="${1:-}"
+    local branch="${1:-main}"
     if [[ -z "${CREATE_PR_BODY:-}" ]]; then
         CREATE_PR_BODY=$(default_create_pr_body "${branch}")
         export CREATE_PR_BODY
@@ -916,7 +910,7 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-if [[ ${ANALYZE} -eq 0 ]]; then
+if [[ ${ANALYZE} -eq 0 && ${PRINT_PR_BODY} -eq 0 ]]; then
     [[ -n "${BRANCH}" ]] || { usage; exit 1; }
     validate_branch "${BRANCH}"
 elif [[ -z "${BRANCH}" ]]; then
