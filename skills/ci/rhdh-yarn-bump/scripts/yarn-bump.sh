@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
-#
-# Multi-repo Yarn Berry 4.x bump: resolve version, clone, bump, open PR/MR.
-# Mutator: bump-yarn.js. PR helper: midstream createPR.sh when CREATE_PR_SCRIPT is set.
-#
-#   yarn-bump.sh [--to VER] [--branch main] [--dry-run] [--no-push] [--workdir DIR]
-#
+# Multi-repo Yarn Berry 4.x bump. Mutator: bump-yarn.js.
+# When CREATE_PR_SCRIPT is set, sources midstream createPR.sh for GitHub PRs.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -91,18 +87,6 @@ github_clone_url() {
   fi
 }
 
-gitlab_clone_url() {
-  local slug="$1"
-  local host="${CI_SERVER_HOST:-gitlab.cee.redhat.com}"
-  local tok="${PRIVATE_TOKEN:-}"
-  local user="${CI_PROJECT_NAME:-oauth2}"
-  if [[ -n "${tok}" ]]; then
-    printf 'https://%s:%s@%s/%s.git' "${user}" "${tok}" "${host}" "${slug}"
-  else
-    printf 'https://%s/%s.git' "${host}" "${slug}"
-  fi
-}
-
 clone_repo() {
   local url="$1" dest="$2"
   git clone --branch "${BRANCH}" --single-branch --depth 50 "${url}" "${dest}"
@@ -167,6 +151,7 @@ commit_and_pr() {
     popd >/dev/null
     return 0
   fi
+  # Prefer midstream createPR.sh when CREATE_PR_SCRIPT was sourced.
   if [[ "${host}" == "github" ]] && declare -F createPr >/dev/null; then
     CREATE_PR_BODY="$(printf '## Summary\n- Bump Yarn Berry to `%s`.\n\n## Test plan\n- [ ] `yarn --version` is %s\n' "${TO}" "${TO}")"
     export CREATE_PR_BODY
@@ -211,11 +196,19 @@ process_gh() {
 
 process_gl() {
   local slug="$1"
-  local name dest
+  local name dest url host tok user
   name=$(basename "${slug}")
   dest="${WORKDIR}/gl-${name}"
+  host="${CI_SERVER_HOST:-gitlab.cee.redhat.com}"
+  tok="${PRIVATE_TOKEN:-}"
+  user="${CI_PROJECT_NAME:-oauth2}"
+  if [[ -n "${tok}" ]]; then
+    url="https://${user}:${tok}@${host}/${slug}.git"
+  else
+    url="https://${host}/${slug}.git"
+  fi
   echo "=== gitlab ${slug} ==="
-  if ! clone_repo "$(gitlab_clone_url "${slug}")" "${dest}"; then
+  if ! clone_repo "${url}" "${dest}"; then
     echo "[ERROR] clone failed ${slug}"; RC=1; return
   fi
   if has_open_gl_mr "${slug}"; then
