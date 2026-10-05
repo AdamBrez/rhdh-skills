@@ -111,6 +111,27 @@ has_open_gl_mr() {
     | jq -e --arg p "${TOPIC}" '[.[] | select(.source_branch | startswith($p))] | length > 0' >/dev/null
 }
 
+# Yarn rewrites .yarnrc.yml with double quotes; repos that run prettier:check
+# (rhdh-cli) reject that. Format changed files before the commit when the
+# repo defines a prettier script. Missing node_modules is a hard failure so
+# we do not open a PR CI will reject.
+apply_repo_formatters() {
+  [[ -f package.json ]] || return 0
+  jq -e '.scripts["prettier:check"] or .scripts["prettier:fix"]' package.json >/dev/null 2>&1 || return 0
+  local changed=()
+  local f
+  while IFS= read -r f; do
+    [[ -n "${f}" ]] && changed+=("${f}")
+  done < <(git diff --name-only --diff-filter=ACMR)
+  [[ ${#changed[@]} -gt 0 ]] || return 0
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    echo "[INFO] dry-run: would prettier --write ${#changed[@]} changed files"
+    return 0
+  fi
+  echo "[INFO] prettier --write (${#changed[@]} files)"
+  yarn prettier --ignore-unknown --write -- "${changed[@]}"
+}
+
 commit_and_pr() {
   local dir="$1" slug="$2"
   local title="chore(deps): bump Yarn to ${TO}"
@@ -121,6 +142,7 @@ commit_and_pr() {
     popd >/dev/null
     return 0
   fi
+  apply_repo_formatters
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     echo "[INFO] dry-run: would commit/PR ${slug}"
     popd >/dev/null
