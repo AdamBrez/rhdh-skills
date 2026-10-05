@@ -38,6 +38,8 @@ chmod +x .yarn/releases/yarn-<to>.cjs
 yarn install --mode=update-lockfile
 ```
 
+When `package.json` defines `prettier:check` or `prettier:fix`, `yarn-bump.sh` runs `yarn prettier --ignore-unknown --write` on the changed files before commit. Yarn writes `"**"` in `.yarnrc.yml`; Prettier (rhdh-cli) requires `'**'`.
+
 Plus pins Yarn cannot see: `ENV YARN=`, Containerfile / Dockerfile / embedded `yarn set version`.
 
 **No binary download.** Bump GitHub first; copy `yarn-<to>.cjs` into GitLab CEE trees.
