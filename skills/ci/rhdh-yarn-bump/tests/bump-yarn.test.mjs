@@ -13,7 +13,6 @@ const scriptsDir = path.join(
   "scripts",
 );
 const bumpYarn = require(path.join(scriptsDir, "bump-yarn.js"));
-const weekly = require(path.join(scriptsDir, "weekly-yarn-bump.js"));
 
 describe("rewriteExtras", () => {
   it("rewrites yarn binary pins and yarn set version", () => {
@@ -44,8 +43,7 @@ describe("collectFromVersions", () => {
       path.join(root, ".yarn", "releases", "yarn-4.17.1.cjs"),
       "//",
     );
-    const from = bumpYarn.collectFromVersions(root, "4.18.1");
-    assert.deepEqual(from, ["4.17.1"]);
+    assert.deepEqual(bumpYarn.collectFromVersions(root, "4.18.1"), ["4.17.1"]);
   });
 
   it("returns empty when already on --to", () => {
@@ -84,39 +82,5 @@ describe("copyYarnBin", () => {
       fs.existsSync(path.join(dest, ".yarn", "releases", "yarn-4.17.1.cjs")),
       false,
     );
-  });
-});
-
-describe("pickLatest4", () => {
-  it("picks highest 4.x and ignores 5.x", () => {
-    assert.equal(
-      weekly.pickLatest4(["4.17.1", "5.0.0", "4.18.1", "3.8.0"]),
-      "4.18.1",
-    );
-  });
-
-  it("returns null when no 4.x", () => {
-    assert.equal(weekly.pickLatest4(["5.0.0", "1.22.22"]), null);
-  });
-});
-
-describe("firstMatchingPrUrl", () => {
-  it("matches GitHub headRefName prefix", () => {
-    const url = weekly.firstMatchingPrUrl(
-      [
-        { headRefName: "renovate/yarn", url: "https://x/1" },
-        { headRefName: "chore/automated-yarn-bump", url: "https://x/2" },
-      ],
-      weekly.TOPIC,
-    );
-    assert.equal(url, "https://x/2");
-  });
-
-  it("matches GitLab source_branch + web_url", () => {
-    const url = weekly.firstMatchingPrUrl(
-      [{ source_branch: "chore/automated-yarn-bump", web_url: "https://gl/3" }],
-      weekly.TOPIC,
-    );
-    assert.equal(url, "https://gl/3");
   });
 });

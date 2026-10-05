@@ -8,10 +8,9 @@
  *   rewrite extras Yarn cannot see (ENV YARN= / Containerfile / embedded set version)
  *
  * No binary download. Bump GitHub workspaces first; copy yarn-<to>.cjs into
- * gitlab.cee.redhat.com midstream/distgit trees (rhidp/rhdh,
- * rhidp/rhdh-plugin-catalog) that only pin via ENV YARN= / checked-in releases.
+ * gitlab.cee.redhat.com midstream/distgit trees that only pin via ENV YARN=.
  *
- *   bump-yarn.js --to 4.17.1 --root PATH... [--from V1,V2] [--from-all] [--copy-bin SRC]
+ *   bump-yarn.js --to 4.17.1 --root PATH... [--from V1,V2|--from-all] [--copy-bin SRC]
  *   bump-yarn.js --scan --root PATH
  */
 "use strict";
@@ -21,7 +20,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const DEFAULT_FROM = ["4.12.0", "4.14.1"];
-/** Pins that weekly / --from-all must not move (legacy / dcm). */
+/** Pins --from-all must not move (legacy / dcm). */
 const DENYLIST = new Set(["4.8.1", "4.9.2", "4.15.0"]);
 const SKIP = new Set([
   ".git",
@@ -69,12 +68,12 @@ function parseArgs(argv) {
     else if (x === "--no-refresh-locks") a.locks = false;
     else if (x === "--from-all") a.fromAll = true;
     else if (x === "--to") a.to = argv[++i];
-    else if (x === "--from")
+    else if (x === "--from") {
       a.from = String(argv[++i])
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
-    else if (x === "--root") a.roots.push(path.resolve(argv[++i]));
+    } else if (x === "--root") a.roots.push(path.resolve(argv[++i]));
     else if (x === "--copy-bin") a.copyBin = path.resolve(argv[++i]);
     else {
       console.error(`Unknown: ${x}`);
@@ -95,15 +94,6 @@ function pushWalkDir(stack, full, name) {
   }
 }
 
-function walkEntry(stack, dir, e, fn) {
-  const full = path.join(dir, e.name);
-  if (e.isDirectory()) {
-    pushWalkDir(stack, full, e.name);
-    return;
-  }
-  if (e.isFile()) fn(full, e.name, dir);
-}
-
 function walk(root, fn) {
   const stack = [root];
   while (stack.length) {
@@ -114,7 +104,11 @@ function walk(root, fn) {
     } catch {
       continue;
     }
-    for (const e of ents) walkEntry(stack, dir, e, fn);
+    for (const e of ents) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) pushWalkDir(stack, full, e.name);
+      else if (e.isFile()) fn(full, e.name, dir);
+    }
   }
 }
 
@@ -158,7 +152,6 @@ function localBin(dir) {
   }
 }
 
-/** Yarn CLI must be executable for yarnPath / node yarn-*.cjs. */
 function chmodX(p) {
   try {
     fs.chmodSync(p, 0o755); // NOSONAR — intentional +x for Berry CLI binary
@@ -236,19 +229,6 @@ function resolveToBin(dir, to) {
   return null;
 }
 
-function bumpCount(map, key) {
-  map.set(key, (map.get(key) || 0) + 1);
-}
-
-function fmtCounts(map) {
-  return (
-    [...map.entries()]
-      .toSorted(([a], [b]) => cmpStr(a, b))
-      .map(([v, n]) => `${v}×${n}`)
-      .join(", ") || "(none)"
-  );
-}
-
 function collectFromVersions(root, to) {
   const versions = new Set();
   walk(root, (_full, base, dir) => {
@@ -268,9 +248,8 @@ function copyYarnBin(srcRoot, destRoot, to, dryRun) {
   const name = `yarn-${to}.cjs`;
   let src = path.join(srcRoot, ".yarn", "releases", name);
   if (!fs.existsSync(src)) src = resolveToBin(srcRoot, to);
-  if (!src || !fs.existsSync(src)) {
+  if (!src || !fs.existsSync(src))
     throw new Error(`no ${name} under ${srcRoot}`);
-  }
   const destDir = path.join(destRoot, ".yarn", "releases");
   const dest = path.join(destDir, name);
   if (dryRun) {
@@ -285,6 +264,19 @@ function copyYarnBin(srcRoot, destRoot, to, dryRun) {
     if (m && m[1] !== to) fs.unlinkSync(path.join(destDir, n));
   }
   return dest;
+}
+
+function bumpCount(map, key) {
+  map.set(key, (map.get(key) || 0) + 1);
+}
+
+function fmtCounts(map) {
+  return (
+    [...map.entries()]
+      .toSorted(([a], [b]) => cmpStr(a, b))
+      .map(([v, n]) => `${v}×${n}`)
+      .join(", ") || "(none)"
+  );
 }
 
 function scan(root) {
