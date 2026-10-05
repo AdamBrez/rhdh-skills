@@ -60,8 +60,12 @@ until that path is migrated.
 - On RHDH, update Node headers when the builder image changes Node. Then, when
   those checkouts are in scope, pin plugin-catalog
   `build/containerfiles/builder.Containerfile` FROM to the same UBI Node
-  `tag@sha256`, copy `.nvm/`, rewrite `konflux.additional-tags` `node-v*` to
-  match `.nvmrc`, and set overlays `versions.json` `node` to that version.
+  `tag@sha256`. Catalog headers follow the Node version that Containerfile
+  will run: image `node --version`, or the newer `nodejs` RPM from
+  `dnf repoquery` when the file `dnf`-installs `nodejs` before the headers
+  `RUN`. Do not copy an older rhdh `.nvm/` over that version. Rewrite
+  `konflux.additional-tags` `node-v*` to match the catalog `.nvmrc`, and set
+  overlays `versions.json` `node` to the rhdh `.nvmrc` value.
   Catalog maps `release-1.Y` → GitLab `rhdh-1.Y-rhel-9` and
   `release-2.Y` → GitLab `release-2.Y` (using UBI10 / RHEL10). Catalog has no
   `rpms.lock.yaml`. Do not `[skip-build]` the catalog builder commit.

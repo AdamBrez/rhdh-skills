@@ -516,6 +516,113 @@ node_version_from_image() {
     "${runner}" run --rm --entrypoint node "${image}" --version 2>/dev/null | tr -d '\n\r'
 }
 
+container_runtime() {
+    if command -v podman >/dev/null 2>&1; then
+        echo podman
+    elif command -v docker >/dev/null 2>&1; then
+        echo docker
+    fi
+}
+
+# builder.Containerfile runs `dnf install nodejs` before `node --version` for headers.
+catalog_dnf_installs_nodejs_before_headers() {
+    local catalog_cf="$1"
+    awk '
+        /^RUN NODE_HEADERS_VERSION=/ { exit }
+        /dnf/ && /nodejs/ { found = 1 }
+        END { exit found ? 0 : 1 }
+    ' "${catalog_cf}"
+}
+
+nodejs_stream_major_from_image() {
+    local image="$1"
+    if [[ "${image}" =~ nodejs-([0-9]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+    fi
+}
+
+# Plain X.Y.Z of the newest nodejs RPM the image can install for that module stream.
+nodejs_rpm_version_in_image() {
+    local image="$1"
+    local major="$2"
+    local runner out
+    runner=$(container_runtime)
+    [[ -n "${runner}" && -n "${major}" ]] || return 0
+    out=$("${runner}" run --rm --user 0 --entrypoint bash "${image}" -lc \
+        "dnf module enable nodejs:${major} -y >/dev/null && dnf repoquery -q --latest-limit 1 nodejs" \
+        2>/dev/null) || return 0
+    printf '%s\n' "${out}" | python3 -c '
+import re
+import sys
+
+versions = set()
+for line in sys.stdin:
+    match = re.search(r"nodejs-(?:[0-9]+:)?([0-9]+\.[0-9]+\.[0-9]+)-", line)
+    if match:
+        versions.add(match.group(1))
+if not versions:
+    raise SystemExit(0)
+
+def sort_key(version):
+    return tuple(int(part) for part in version.split("."))
+
+print(max(versions, key=sort_key))
+'
+}
+
+# Newer of two Node versions (v-prefix optional). Empty input is ignored.
+newer_node_plain() {
+    local left="${1#v}"
+    local right="${2#v}"
+    if [[ -z "${left}" ]]; then
+        printf '%s\n' "${right}"
+        return 0
+    fi
+    if [[ -z "${right}" ]]; then
+        printf '%s\n' "${left}"
+        return 0
+    fi
+    printf '%s\n%s\n' "${left}" "${right}" | sort -V | tail -n1
+}
+
+# Headers version the catalog builder will see: image node, or a newer dnf nodejs RPM.
+catalog_headers_plain_version() {
+    local catalog_cf="$1"
+    local image="$2"
+    local image_version="" rpm_version="" major=""
+    image_version=$(node_version_from_image "${image}") || true
+    image_version="${image_version#v}"
+    if catalog_dnf_installs_nodejs_before_headers "${catalog_cf}"; then
+        major=$(nodejs_stream_major_from_image "${image}")
+        rpm_version=$(nodejs_rpm_version_in_image "${image}" "${major}") || true
+        if [[ -n "${rpm_version}" ]]; then
+            log "plugin-catalog: dnf nodejs ${rpm_version} (image node ${image_version:-unknown})"
+        else
+            warn "plugin-catalog: could not repoquery nodejs in ${image}; using image node ${image_version:-unknown}"
+        fi
+    fi
+    newer_node_plain "${image_version}" "${rpm_version}"
+}
+
+ensure_node_headers_files() {
+    local node_plain="$1"
+    local headers_file=".nvm/releases/node-v${node_plain}-headers.tar.gz"
+    local readme_file=".nvm/releases/README.adoc"
+    local current_nvmrc=""
+    mkdir -p .nvm/releases
+    [[ -f .nvmrc ]] && current_nvmrc=$(tr -d '\n\r' < .nvmrc)
+    if [[ ! -f "${headers_file}" ]]; then
+        curl -fsSL "https://nodejs.org/dist/v${node_plain}/node-v${node_plain}-headers.tar.gz" \
+            -o "${headers_file}"
+    fi
+    if [[ "${current_nvmrc}" != "${node_plain}" ]] \
+        || ! nvm_readme_documents_version "${readme_file}" "v${node_plain}"; then
+        echo "${node_plain}" > .nvmrc
+        update_nvm_releases_readme "${readme_file}" "v${node_plain}"
+    fi
+    remove_stale_header_tarballs "${headers_file}"
+}
+
 update_nvm_releases_readme() {
     local readme="$1"
     local node_version="$2"
@@ -676,34 +783,62 @@ update_plugin_catalog_node() {
     local catalog_cf="${repo_dir}/build/containerfiles/builder.Containerfile"
     [[ -f "${catalog_cf}" ]] || return 0
 
-    local src_image="" node_plain="" headers_file
+    local src_image="" node_plain="" rhdh_plain="" headers_file
     if [[ -n "${rhdh_src}" && -f "${rhdh_src}/.nvmrc" ]]; then
         src_image=$(rhdh_nodejs_builder_image "$(rhdh_nodejs_containerfile "${rhdh_src}")")
-        node_plain=$(tr -d '\n\r' < "${rhdh_src}/.nvmrc")
+        rhdh_plain=$(tr -d '\n\r' < "${rhdh_src}/.nvmrc")
     fi
 
     if [[ ${DRY_RUN} -eq 1 ]]; then
-        echo "  dry-run: pin ${catalog_cf} FROM to rhdh UBI node image; copy .nvm/; rewrite konflux.additional-tags node-v*"
+        echo "  dry-run: pin ${catalog_cf} FROM to rhdh UBI node image"
+        echo "  dry-run: headers from image node --version, or newer dnf repoquery nodejs when the builder dnf-installs nodejs"
+        echo "  dry-run: skip copying an older rhdh .nvm/; rewrite konflux.additional-tags node-v*"
+        return 0
+    fi
+
+    if ! command -v podman >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
+        warn "plugin-catalog: podman or docker required to resolve node headers; skipping"
         return 0
     fi
 
     pushd "${repo_dir}" >/dev/null
     if [[ -n "${src_image}" ]]; then
         pin_catalog_builder_from "${catalog_cf}" "${src_image}"
-        copy_nvm_tree "${rhdh_src}" "${repo_dir}"
-    else
-        log "plugin-catalog: no rhdh checkout in this run; refreshing headers from catalog FROM"
-        update_rhdh_node_headers "${repo_dir}" "${git_branch}"
-        [[ -f .nvmrc ]] && node_plain=$(tr -d '\n\r' < .nvmrc)
     fi
 
-    if [[ -n "${node_plain}" ]]; then
-        rewrite_catalog_additional_tags "${catalog_cf}" "${node_plain}"
-        headers_file=".nvm/releases/node-v${node_plain}-headers.tar.gz"
-        remove_stale_header_tarballs "${headers_file}"
-        commit_push_paths "${git_branch}" "chore: pin catalog builder to Node v${node_plain}" \
-            .nvmrc "${headers_file}" .nvm/releases/README.adoc "${catalog_cf}"
+    local catalog_image
+    catalog_image=$(rhdh_nodejs_builder_image "${catalog_cf}")
+    if [[ -z "${catalog_image}" ]]; then
+        warn "plugin-catalog: no ubi*/nodejs FROM in ${catalog_cf}"
+        popd >/dev/null
+        return 0
     fi
+
+    node_plain=$(catalog_headers_plain_version "${catalog_cf}" "${catalog_image}")
+    if [[ -z "${node_plain}" ]]; then
+        warn "plugin-catalog: could not resolve a Node headers version from ${catalog_image}"
+        popd >/dev/null
+        return 0
+    fi
+
+    if [[ -n "${rhdh_src}" && -n "${rhdh_plain}" ]]; then
+        if [[ "$(newer_node_plain "${rhdh_plain}" "${node_plain}")" == "${rhdh_plain}" ]]; then
+            copy_nvm_tree "${rhdh_src}" "${repo_dir}"
+            node_plain="${rhdh_plain}"
+        else
+            log "plugin-catalog: rhdh headers ${rhdh_plain} are older than builder nodejs ${node_plain}; not copying them"
+            if [[ -f "${rhdh_src}/.nvm/releases/README.adoc" && ! -f .nvm/releases/README.adoc ]]; then
+                mkdir -p .nvm/releases
+                /bin/cp -f "${rhdh_src}/.nvm/releases/README.adoc" .nvm/releases/README.adoc
+            fi
+        fi
+    fi
+
+    ensure_node_headers_files "${node_plain}"
+    rewrite_catalog_additional_tags "${catalog_cf}" "${node_plain}"
+    headers_file=".nvm/releases/node-v${node_plain}-headers.tar.gz"
+    commit_push_paths "${git_branch}" "chore: pin catalog builder to Node v${node_plain}" \
+        .nvmrc "${headers_file}" .nvm/releases/README.adoc "${catalog_cf}"
     popd >/dev/null
 }
 
