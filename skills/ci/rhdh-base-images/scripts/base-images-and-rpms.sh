@@ -487,7 +487,10 @@ commit_push_paths() {
     fi
 
     git commit -s -m "${message}"
-    git push -u origin "${push_branch}"
+    if ! git push -u origin "${push_branch}"; then
+        warn "git push failed for origin/${push_branch}; commit remains local"
+        return 0
+    fi
     log "Pushed ${message} to origin/${push_branch}"
 
     if [[ "${push_branch}" == chore/automated-update-rpm-lockfile/* ]] \
