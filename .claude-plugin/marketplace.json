@@ -68,13 +68,14 @@
       "skills": [
         "./skills/ci/rhdh-base-images",
         "./skills/reference/mutation-gate",
+        "./skills/reference/prose-editing",
         "./skills/ci/rhdh-konflux-tasks",
         "./skills/ci/rhdh-konflux-rpa",
         "./skills/reference/rhdh-forge",
         "./skills/ci/rhdh-prow-jobs",
         "./skills/ci/rhdh-prow-release-branch",
-        "./skills/reference/prose-editing",
         "./skills/ci/rhdh-prow-trigger",
+        "./skills/ci/rhdh-pr-mr",
         "./skills/ci/rhdh-yarn-bump"
       ]
     },
