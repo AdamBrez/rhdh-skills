@@ -128,7 +128,10 @@ Editing `.tekton` YAML, committing, pushing, and opening a pull request are
 writes. Follow `/mutation-gate`.
 
 - Always pass `--no-push` / `--nopush`. Do not push or open a PR unless the user
-  explicitly asks. `generatePipelineRuns.sh` neither commits nor pushes.
+  explicitly asks. `generatePipelineRuns.sh` neither commits nor pushes. When the
+  user does ask to open a PR/MR, invoke `/rhdh-pr-mr` by name after
+  `/mutation-gate` approval; pass `--issue` when a Jira key is known, otherwise
+  skip linking.
 - When replacing a legacy task with `-oci-ta`, edit templates and shared
   pipelines first, then regenerate PLRs (or patch inline `pipelineSpec` PLRs by
   hand). Editing only PLRs leaves the source of truth stale.

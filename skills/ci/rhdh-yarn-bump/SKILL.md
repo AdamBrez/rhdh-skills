@@ -50,9 +50,9 @@ SKILL=<this skill's directory>
 "$SKILL/scripts/yarn-bump.sh" --to 4.18.1 --dry-run
 ```
 
-It resolves Yarn 4.x (`@yarnpkg/cli`; never `stable` / 5.x unless `--to`), clones the six repos, skips open `chore/automated-yarn-bump*` PRs/MRs and denylist pins (`4.8.1` / `4.9.2` / `4.15.0`), bumps GH then GL (with `--copy-bin`), commits as `rhdh-bot`, and opens PRs/MRs. When `CREATE_PR_SCRIPT` points at midstream `createPR.sh`, GitHub PRs use that helper.
+It resolves Yarn 4.x (`@yarnpkg/cli`; never `stable` / 5.x unless `--to`), clones the six repos, skips open `chore/automated-yarn-bump*` PRs/MRs and denylist pins (`4.8.1` / `4.9.2` / `4.15.0`), bumps GH then GL (with `--copy-bin`), commits as `rhdh-bot`, and opens PRs/MRs via sibling `/rhdh-pr-mr` (no Jira key for bot bumps).
 
-GitLab weekly-maintenance clones this skill and runs `yarn-bump.sh` after digest/bootc and before Quay cleanup.
+GitLab weekly-maintenance clones this skill pack and runs `yarn-bump.sh` after digest/bootc and before Quay cleanup.
 
 ## Manual mutator (existing checkouts)
 
