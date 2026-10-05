@@ -6,91 +6,82 @@ description: >-
   rhdh-plugin-catalog — with `yarn set version` plus install, and rewrites the
   pins Yarn cannot see: `packageManager`, `yarnPath`, `ENV YARN=`, and
   Containerfile lines. Use for "bump yarn to 4.17.1", "upgrade Yarn Berry across
-  the repos", "which Yarn version is each repo pinned to", or scanning yarn pins.
-compatibility: "Node, yarn, and git on PATH; glab authenticated against gitlab.cee.redhat.com for the GitLab CEE merge requests."
+  the repos", "weekly yarn bump", "which Yarn version is each repo pinned to",
+  or scanning yarn pins.
+compatibility: "Node, yarn, git, gh on PATH; PRIVATE_TOKEN + gitlab.cee.redhat.com for GitLab CEE MRs."
 ---
 
 # RHDH multi-repo Yarn bump
 
 ## Goal
 
-Propagate a Yarn Berry bump (e.g. [rhdh-plugins#2918](https://github.com/redhat-developer/rhdh-plugins/pull/2918), [RHIDP-16074](https://redhat.atlassian.net/browse/RHIDP-16074)) across:
+Propagate a Yarn Berry 4.x bump across:
 
 | Repo | Notes |
-|------|--------|
+| --- | --- |
 | [`redhat-developer/rhdh-plugins`](https://github.com/redhat-developer/rhdh-plugins) | root workspace (+ Fullsend if hardcoded) |
 | [`redhat-developer/rhdh`](https://github.com/redhat-developer/rhdh) | root + nested workspaces + Containerfile |
 | [`redhat-developer/rhdh-plugin-export-overlays`](https://github.com/redhat-developer/rhdh-plugin-export-overlays) | many `packageManager` pins |
-| [`redhat-developer/rhdh-cli`](https://github.com/redhat-developer/rhdh-cli) | root `packageManager` / `yarnPath` (now Yarn 4.17.1) |
+| [`redhat-developer/rhdh-cli`](https://github.com/redhat-developer/rhdh-cli) | root `packageManager` / `yarnPath` |
 | [`gitlab.cee.redhat.com/rhidp/rhdh`](https://gitlab.cee.redhat.com/rhidp/rhdh) | distgit binary + `ENV YARN=` (copy binary from GH bump) |
 | [`gitlab.cee.redhat.com/rhidp/rhdh-plugin-catalog`](https://gitlab.cee.redhat.com/rhidp/rhdh-plugin-catalog) | per-workspace pins + Containerfiles |
 
-## What actually changes
+Renovate Yarn `packageManager` updates are disabled (RHIDP-17563). This skill is the bump path.
 
-For each matching workspace:
+**Branch:** live line is `main` on GitHub and GitLab CEE. Extra `release-2.*` lines are a future weekly-maintenance loop, not a second flag.
 
-```bash
-yarn set version <to>                 # packageManager + yarnPath + .yarn/releases
-chmod +x .yarn/releases/yarn-<to>.cjs
-yarn install --mode=update-lockfile
-```
+## Default path: weekly script
 
-Plus pins Yarn cannot see: `ENV YARN=`, Containerfile / Dockerfile / embedded `yarn set version`.
-
-**No binary download.** Bump GitHub repos first (`yarn set version` produces `yarn-<to>.cjs`). For **GitLab CEE** midstream/distgit trees (`gitlab.cee.redhat.com/rhidp/rhdh`, `…/rhdh-plugin-catalog`) that only ship a checked-in release + `ENV YARN=`, copy that same `yarn-<to>.cjs` into `.yarn/releases/` (and remove the old `yarn-<from>.cjs`), then run the script so text pins update. Use `glab` against `gitlab.cee.redhat.com` (not `gitlab.com`) when opening MRs for those roots.
-
-Use an **exact** `--to` (not `stable`) so every repo matches the Renovate/reference PR.
-
-## Script
+The product is the script. Weekly CI and humans run the same command:
 
 ```bash
 SKILL=<this skill's directory>
-# GH first (4.12/4.14 defaults), then GL CEE (after copying yarn-<to>.cjs into distgit if needed)
-node "$SKILL/scripts/bump-yarn.js" --to 4.17.1 \
-  --root /path/to/rhdh-plugins \
-  --root /path/to/rhdh \
-  --root /path/to/overlays \
-  --root /path/to/rhdh-cli \
-  --root /path/to/rhdh-downstream \
-  --root /path/to/rhdh-plugin-catalog
+node "$SKILL/scripts/weekly-yarn-bump.js"          # resolve latest Yarn 4.x, clone, bump, PR/MR
+node "$SKILL/scripts/weekly-yarn-bump.js" --to 4.18.1 --dry-run
+node "$SKILL/scripts/weekly-yarn-bump.js" --help
 ```
 
-Defaults:
+It:
 
-- `--from 4.12.0,4.14.1` — only those move (`4.8.1` / `4.9.2` / dcm `4.15.0` stay). Repos already on `--to` (e.g. rhdh-cli at 4.17.1) are no-ops.
-- Lock refresh for every `yarn.lock` under `--to` (incl. inherited root pin); skip `dist-dynamic` and explicit older pins. Full multi-repo regen can take **>45 minutes**; use `--no-refresh-locks` to skip
+1. Resolves latest **Yarn 4.x** (`@yarnpkg/cli`; never `stable`, never 5.x unless `--to` is exact).
+2. Clones `main` for the six repos (GitHub first).
+3. Skips a repo if it is already on `--to`, only denylist pins remain (`4.8.1` / `4.9.2` / `4.15.0`), or an open bot PR/MR exists on `chore/automated-yarn-bump*`.
+4. Runs `yarn set version` on GitHub; **copies** `yarn-<to>.cjs` into GitLab CEE trees (no extra download).
+5. Rewrites extras (`ENV YARN=`, Containerfile, embedded `yarn set version`) and refreshes lockfiles in the **same** run.
+6. Commits as `rhdh-bot`, pushes, opens GitHub PRs (`ok-to-test`) / GitLab CEE MRs. No Jira. `--no-open`.
+
+`--from` in weekly mode is every non-denylist pin that is not already `--to`.
+
+Lock refresh for overlays / rhdh-plugins can exceed **45 minutes**. Failures in one repo do not skip the rest; the process exits non-zero if any repo failed.
+
+GitLab weekly-maintenance clones this skill and runs the script **once** after digest/bootc work and **before** Quay tag deletion. Extra branches later: one `--branch` loop in that shell, not a second yarn phase.
+
+## Manual mutator (existing checkouts)
+
+When trees are already cloned:
 
 ```bash
 node "$SKILL/scripts/bump-yarn.js" --scan --root /path/to/repo
-node "$SKILL/scripts/bump-yarn.js" --to 4.17.1 --root /path/to/repo --dry-run
-node "$SKILL/scripts/bump-yarn.js" --to 4.17.1 --root /path/to/repo --no-refresh-locks
+node "$SKILL/scripts/bump-yarn.js" --to 4.18.1 --from-all --root /path/to/rhdh-plugins
+node "$SKILL/scripts/bump-yarn.js" --to 4.18.1 --copy-bin /path/to/rhdh-plugins \
+  --from-all --root /path/to/rhdh-downstream
 ```
 
-## Agent workflow
+`--from 4.12.0,4.14.1` remains the human default when `--from-all` is omitted.
 
-1. Confirm `--to` / `--from`.
-2. Resolve local `--root` checkouts; bump **GitHub** roots first.
-3. For GitLab CEE midstream/distgit (`gitlab.cee.redhat.com/rhidp/rhdh`, `…/rhdh-plugin-catalog`): copy `yarn-<to>.cjs` from a GH bump into `.yarn/releases/` (drop old `--from` binary).
-4. `--scan`, then bump (`--dry-run` first if unfamiliar).
-5. Summarize set-version dirs, extras, lock refresh.
-6. Commit, push, or open a PR·MR only when the user asks, following
-   `/mutation-gate` with the repository and branch as each target. To attach
-   the work to its Jira issue, invoke `/rhdh-jira-link` by name and use what it
-   returns.
+## Anti-patterns
+
+- Do not re-enable Renovate Yarn bumps; they only update one repo and miss Containerfile / `ENV YARN=`.
+- Do not `yarn set version stable` — repos must share one exact 4.x.
+- Do not download a second Yarn binary for GitLab CEE; copy the GitHub `yarn-<to>.cjs`.
+- Do not special-case `rhdh-1-rhel-9`; both CEE repos default to `main`.
+
+## Tests
+
+```bash
+node --test "$SKILL/tests/bump-yarn.test.mjs"
+```
 
 ## Completion
 
-A bump is done when every requested `--root` has been scanned and each
-workspace matching `--from` sits on `--to`, leaving behind:
-
-- updated `packageManager`, `yarnPath`, and `.yarn/releases/yarn-<to>.cjs` at
-  mode `100755`, with the old `--from` binary removed;
-- rewritten pins Yarn cannot see: `ENV YARN=`, Containerfile / Dockerfile, and
-  embedded `yarn set version` lines;
-- refreshed `yarn.lock` files, or a stated `--no-refresh-locks` skip.
-
-Report the set-version directories, the extras rewritten, the lock-refresh
-result, and every root left untouched with its reason: already on `--to`,
-pinned outside `--from`, or not checked out locally. Working trees stay
-uncommitted; if the user asked for a commit, PR, or MR, report the outcome of
-each of those writes too.
+Weekly/CI is done when each requested repo was processed and stdout lists `repo:` / `skipped:` / `url:` lines. A bump on a root is done when matching workspaces sit on `--to` (`packageManager`, `yarnPath`, `yarn-<to>.cjs` mode `100755`), extras are rewritten, and lockfiles refreshed unless `--no-refresh-locks`.
