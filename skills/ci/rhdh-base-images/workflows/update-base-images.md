@@ -9,7 +9,7 @@ Refresh **base images** and **RPM lockfiles** in the GitHub hub/operator/must-ga
 | Repo | Node / Go source | RPM containerfile |
 |------|------------------|-------------------|
 | rhdh | `build/containerfiles/Containerfile` or `docker/Dockerfile` (release-1.9) | `build/containerfiles/Containerfile` or `.rhdh/docker/Dockerfile` |
-| rhdh-operator | `go.mod` aligned with `ubi10/go-toolset` on **main** only | `.rhdh/docker/Dockerfile` |
+| rhdh-operator | `go.mod` aligned with `ubi10/go-toolset` on **main** only | root `Dockerfile` (main, release-2.*, later); `.rhdh/docker/Dockerfile` on release-1.* |
 | rhdh-must-gather | — | `Containerfile` |
 | rhdh-plugin-catalog | `builder.Containerfile` FROM + `.nvm/` + `konflux.additional-tags` `node-v*` | none |
 | rhdh-plugin-export-overlays | `versions.json` `node` | none |

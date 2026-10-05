@@ -191,9 +191,32 @@ rhdh_nodejs_containerfile() {
     fi
 }
 
+# Operator images: release-1.* still uses .rhdh/docker/Dockerfile.
+# main, release-2.*, and later use root Dockerfile (or Containerfile).
+operator_dockerfile_rel() {
+    local repo_dir="$1"
+    local branch="${2:-}"
+    if [[ "${branch}" == release-1.* || "${branch}" == rhdh-1.* ]]; then
+        if [[ -f "${repo_dir}/.rhdh/docker/Dockerfile" ]]; then
+            echo ".rhdh/docker/Dockerfile"
+            return 0
+        fi
+    fi
+    if [[ -f "${repo_dir}/Dockerfile" ]]; then
+        echo "Dockerfile"
+    elif [[ -f "${repo_dir}/Containerfile" ]]; then
+        echo "Containerfile"
+    elif [[ -f "${repo_dir}/.rhdh/docker/Dockerfile" ]]; then
+        echo ".rhdh/docker/Dockerfile"
+    else
+        die "${repo_dir}: no operator Dockerfile (tried Dockerfile, Containerfile, .rhdh/docker/Dockerfile)"
+    fi
+}
+
 rpm_containerfile_for() {
     local repo_dir="$1"
     local kind="$2"
+    local branch="${3:-}"
     case "${kind}" in
         rhdh)
             if [[ -f "${repo_dir}/build/containerfiles/Containerfile" ]]; then
@@ -204,7 +227,7 @@ rpm_containerfile_for() {
                 die "${repo_dir}: no RPM containerfile found for rhdh"
             fi
             ;;
-        rhdh-operator) echo ".rhdh/docker/Dockerfile" ;;
+        rhdh-operator) operator_dockerfile_rel "${repo_dir}" "${branch}" ;;
         rhdh-must-gather) echo "Containerfile" ;;
         rhdh-plugin-catalog | rhdh-plugin-export-overlays)
             die "${repo_dir}: ${kind} has no rpms.lock.yaml"
@@ -364,7 +387,7 @@ update_rpm_lockfile() {
     local rpm_tool="$3"
     local branch="$4"
     local containerfile rpm_err rpm_rc
-    containerfile=$(rpm_containerfile_for "${repo_dir}" "${kind}")
+    containerfile=$(rpm_containerfile_for "${repo_dir}" "${kind}" "${branch}")
 
     [[ -f "${repo_dir}/${containerfile}" ]] || die "${repo_dir}: missing ${containerfile}"
     [[ -f "${repo_dir}/rpms.in.yaml" ]] || die "${repo_dir}: missing rpms.in.yaml"
@@ -751,7 +774,9 @@ go_version_gte() {
 update_operator_go_mod() {
     local repo_dir="$1"
     local branch="$2"
-    local dockerfile="${repo_dir}/.rhdh/docker/Dockerfile"
+    local dockerfile
+    dockerfile=$(operator_dockerfile_rel "${repo_dir}" "${branch}")
+    dockerfile="${repo_dir}/${dockerfile}"
 
     if [[ "${branch}" != "main" ]]; then
         log "Go toolchain: skipping go.mod update on ${branch} (main only)"
