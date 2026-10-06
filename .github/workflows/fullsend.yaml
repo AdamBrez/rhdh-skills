@@ -1,4 +1,7 @@
-# This file is managed by fullsend. Do not edit it directly.
+# Based on fullsend scaffold; customized to disable all agent auto-triggers.
+# Only label-based triggers and /fs-* slash commands remain active.
+# `fullsend repos install` regenerates this file from the template and restores
+# the auto-trigger events — re-apply this customization after every upgrade.
 # Upstream: https://github.com/fullsend-ai/fullsend/blob/main/internal/scaffold/fullsend-repo/.github/workflows/fullsend.yaml
 ---
 # fullsend shim workflow (per-repo installation mode)
@@ -20,21 +23,17 @@
 name: fullsend
 
 on:
-  issues:
-    types: [opened, edited, labeled]
   issue_comment:
     types: [created]
   pull_request_target:
-    types: [opened, synchronize, ready_for_review, closed, labeled, unlabeled]
-  pull_request_review:
-    types: [submitted]
+    types: [labeled, unlabeled]
 
 permissions: {}
 
 jobs:
   dispatch:
     if: >-
-      (github.event_name != 'pull_request_target' && github.event_name != 'pull_request_review'
+      (github.event_name != 'pull_request_target'
        || github.event.pull_request.head.ref != 'fullsend/scaffold-install')
       && (github.event_name != 'issue_comment'
        || (startsWith(github.event.comment.body, '/fs-')
