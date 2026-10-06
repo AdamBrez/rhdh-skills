@@ -65,6 +65,13 @@ acli jira workitem view RHIDP-123 --web
 > payload — do **not** combine `--from-json` with `--description-file` on the same create.
 > `acli jira workitem create --generate-json` prints a starter shape. Create without `versions`
 > fails with `Affects versions is required`.
+>
+> **Private issue exception:** On public projects (RHIDP, RHDHPLAN, RHDHBUGS),
+> put `security` on create when the issue must stay private
+> ([fields.md](fields.md) — Private issues). RHDHSUPP: optional. No `--security`
+> flag — use `--from-json` `additionalAttributes.security` (plus `versions` on
+> RHDHBUGS Bugs), or MCP `additional_fields.security`. Never create-then-restrict.
+> Verify with `view KEY --fields '*all' --json` (defaults omit `security`).
 
 ```bash
 # Basic creation
@@ -72,6 +79,9 @@ acli jira workitem create --project RHIDP --type Story --summary "Implement auth
 
 # RHDHBUGS Bug — single --from-json file (versions + ADF description inside JSON)
 acli jira workitem create --from-json bug-create.json
+
+# Private issue — security on create (never create-then-restrict)
+acli jira workitem create --from-json private-create.json
 
 # With parent (sub-task or child of epic)
 acli jira workitem create --project RHIDP --type Task --summary "Write tests" --parent RHIDP-12968
@@ -82,8 +92,24 @@ acli jira workitem create --from-json workitem.json --project RHIDP --type Epic
 # Generate JSON template
 acli jira workitem create --generate-json
 
-# From description file (Stories/Features/etc. — not for RHDHBUGS Bug when versions are required)
+# From description file (Stories/Features/etc. — not for RHDHBUGS Bug when versions are required,
+# and not for private issues that need security on create)
 acli jira workitem create --project RHIDP --type Story --summary "New feature" --description-file story.txt
+```
+
+Minimal private-create `--from-json` shape (ADF `description` from wiki→ADF;
+scaffold with `--generate-json` if unsure):
+
+```json
+{
+  "projectKey": "RHIDP",
+  "type": "Story",
+  "summary": "Private summary",
+  "description": { "type": "doc", "version": 1, "content": [] },
+  "additionalAttributes": {
+    "security": { "name": "Red Hat Employee" }
+  }
+}
 ```
 
 ### Edit

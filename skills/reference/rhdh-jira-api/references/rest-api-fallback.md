@@ -88,6 +88,14 @@ Release Note Type is a select value. Allowed values include `Feature`, `Enhancem
 `Developer Preview`, `Deprecated Functionality`, `Removed Functionality`, and
 `Release Note Not Required`.
 
+```json
+{"fields": {"security": {"name": "Red Hat Employee"}}}
+```
+
+Security Level object — prefer `name` (`"Red Hat Employee"`) or `id` (`10034`).
+Put it on the **create** payload when the issue must be private; post-create
+update exposes the issue. Pathways: [fields.md](fields.md) (Private issues).
+
 ## Write boundary
 
 A REST-backed write is an external write, so the skill that owns the verb invokes

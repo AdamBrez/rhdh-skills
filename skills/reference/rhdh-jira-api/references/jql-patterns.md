@@ -100,7 +100,10 @@ project = RHDHPLAN AND issuetype = Feature AND labels = stretch AND status not i
 -- FAILS: issueFunction is a ScriptRunner add-on, not available
 issueFunction in hasLinks()
 
--- FAILS: security field not queryable via JQL
+-- Private issues: JQL name is `level`, not REST `security`.
+level = "Red Hat Employee"
+
+-- FAILS: REST `security` is not JQL (acli: parse error; MCP: often empty hits)
 security is not EMPTY
 
 -- FAILS: childIssuesOf function not available
