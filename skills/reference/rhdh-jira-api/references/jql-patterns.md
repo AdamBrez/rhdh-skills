@@ -31,6 +31,9 @@ project = RHIDP AND fixVersion = '1.10.0'
 
 -- Issues by component
 project = RHIDP AND component = 'Documentation'
+
+-- Private issues (Security Level). JQL name is `level`, not REST `security`.
+level = "Red Hat Employee"
 ```
 
 ## Hygiene Queries
@@ -100,10 +103,8 @@ project = RHDHPLAN AND issuetype = Feature AND labels = stretch AND status not i
 -- FAILS: issueFunction is a ScriptRunner add-on, not available
 issueFunction in hasLinks()
 
--- Private issues: JQL name is `level`, not REST `security`.
-level = "Red Hat Employee"
-
--- FAILS: REST `security` is not JQL (acli: parse error; MCP: often empty hits)
+-- FAILS: REST `security` is not JQL (acli: parse error; MCP: often empty hits).
+-- Use `level` (see Core Queries), not the REST field name.
 security is not EMPTY
 
 -- FAILS: childIssuesOf function not available

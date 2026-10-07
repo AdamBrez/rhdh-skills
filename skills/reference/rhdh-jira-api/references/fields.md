@@ -42,7 +42,7 @@ cf[10785] is EMPTY
 | Affects Version | `affectedVersion` | **Required on RHDHBUGS Bug create** — the project createmeta rejects create without it. REST/create payload field is `versions` (e.g. `[{"name": "1.10.0"}]`). Name the RHDH release that exhibits the defect. Not the same as Fix Version. |
 | Components | `component` | JQL-filterable: `component = 'Documentation'`. Not available via `--fields` — use `--json`. |
 | Parent | `parent` | Native hierarchy: sub-task → parent, epic → feature. `parent = RHDHPLAN-382` |
-| Security Level | REST: `security`. JQL: `level` | Query with `level = "Red Hat Employee"`. REST name `security` is not valid JQL. Create rules below. |
+| Security Level | `level` | Query with `level = "Red Hat Employee"`. REST field name is `security` (not valid JQL). Create rules below. |
 
 ### Private issues (Security Level) — create rule (authoritative)
 

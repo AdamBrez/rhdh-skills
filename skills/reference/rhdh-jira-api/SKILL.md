@@ -31,7 +31,7 @@ here.
 | Which `acli` flag does this, and what breaks? | [references/acli-commands.md](references/acli-commands.md) |
 | What JQL answers this? Which board or sprint? | [references/jql-patterns.md](references/jql-patterns.md) |
 | Which custom field, label, link type, component, or priority? | [references/fields.md](references/fields.md) |
-| How do I create or query a private (Security Level) issue? | [references/fields.md](references/fields.md) (Private issues), [references/jql-patterns.md](references/jql-patterns.md), [references/acli-commands.md](references/acli-commands.md) |
+| How do I create or query a private (Security Level) issue? | [references/fields.md](references/fields.md) (Private issues; also jql-patterns / acli-commands) |
 | What must be true before this status transition? | [references/workflows.md](references/workflows.md) |
 | I need a relationship-heavy bulk read or a team roster | [references/graphql-queries.md](references/graphql-queries.md) |
 | `acli` cannot read or set this field | [references/rest-api-fallback.md](references/rest-api-fallback.md) |
