@@ -17,6 +17,7 @@ PUSH=1
 WORKDIR=""
 RC=0
 GH_BIN_ROOT=""
+YARN_BIN=""
 
 GH_REPOS=(
   redhat-developer/rhdh-plugins
@@ -35,8 +36,10 @@ Usage:
   yarn-bump.sh [--to VER] [--branch main] [--dry-run] [--no-push] [--workdir DIR]
 
 Resolves latest Yarn 4.x when --to is omitted. Clones GitHub then GitLab CEE,
-runs bump-yarn.js --from-all (copies yarn-<to>.cjs into GL trees), commits as
-rhdh-bot, opens PRs/MRs on chore/automated-yarn-bump via rhdh-pr-mr (no Jira).
+runs bump-yarn.js --from-all. Downloads the Yarn CLI once and passes --bin so
+each PR/MR commits yarn-<to>.cjs. If that download fails, GitLab falls back to
+copying the binary from a GitHub bump. Commits as rhdh-bot and opens PRs/MRs on
+chore/automated-yarn-bump via rhdh-pr-mr (no Jira).
 
 Env: GITHUB_TOKEN or GH_TOKEN; PRIVATE_TOKEN (GitLab CEE); CREATE_PR_MR (optional).
 EOF
@@ -67,11 +70,35 @@ if [[ -z "${TO}" ]]; then
 fi
 echo "[INFO] yarn bump to=${TO} branch=${BRANCH}"
 
+fetch_yarn_bin() {
+  local dest="${WORKDIR}/yarn-${TO}.cjs"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    echo "[INFO] dry-run: would fetch https://repo.yarnpkg.com/${TO}/packages/yarnpkg-cli/bin/yarn.js"
+    return 0
+  fi
+  if node "${BUMP_JS}" --fetch-bin "${dest}" --to "${TO}"; then
+    YARN_BIN="${dest}"
+    return 0
+  fi
+  echo "[WARN] Yarn CLI download failed; GitHub still runs yarn set version, GitLab copies a GitHub binary when one exists" >&2
+  YARN_BIN=""
+}
+
 if [[ -z "${WORKDIR}" ]]; then
   WORKDIR=$(mktemp -d)
   trap 'rm -rf "${WORKDIR}"' EXIT
 fi
 mkdir -p "${WORKDIR}"
+fetch_yarn_bin
+
+bump_args() {
+  local dest="$1"
+  local -n _args="$2"
+  _args=(--to "${TO}" --from-all --root "${dest}")
+  if [[ -n "${YARN_BIN}" && -f "${YARN_BIN}" ]]; then
+    _args+=(--bin "${YARN_BIN}")
+  fi
+}
 
 github_clone_url() {
   local slug="$1"
@@ -184,7 +211,9 @@ process_gh() {
   if has_open_gh_pr "${dest}"; then
     echo "[INFO] skip ${slug}: open ${TOPIC}* PR"; return
   fi
-  if ! node "${BUMP_JS}" --to "${TO}" --from-all --root "${dest}"; then
+  local args=()
+  bump_args "${dest}" args
+  if ! node "${BUMP_JS}" "${args[@]}"; then
     echo "[ERROR] bump failed ${slug}"; RC=1; return
   fi
   if [[ -z "${GH_BIN_ROOT}" && -f "${dest}/.yarn/releases/yarn-${TO}.cjs" ]]; then
@@ -213,11 +242,14 @@ process_gl() {
   if has_open_gl_mr "${slug}"; then
     echo "[INFO] skip ${slug}: open ${TOPIC}* MR"; return
   fi
-  local args=(--to "${TO}" --from-all --root "${dest}")
-  if [[ -n "${GH_BIN_ROOT}" ]]; then
-    args+=(--copy-bin "${GH_BIN_ROOT}")
-  else
-    echo "[WARN] no GH yarn-${TO}.cjs yet; GL bump may fail without binary"
+  local args=()
+  bump_args "${dest}" args
+  if [[ -z "${YARN_BIN}" ]]; then
+    if [[ -n "${GH_BIN_ROOT}" ]]; then
+      args+=(--copy-bin "${GH_BIN_ROOT}")
+    else
+      echo "[WARN] no fetched yarn-${TO}.cjs and no GitHub copy; GL bump may fail without binary"
+    fi
   fi
   if ! node "${BUMP_JS}" "${args[@]}"; then
     echo "[ERROR] bump failed ${slug}"; RC=1; return
