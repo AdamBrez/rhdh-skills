@@ -123,17 +123,6 @@ describe("copyYarnBin", () => {
   });
 });
 
-describe("yarnCliUrl", () => {
-  it("builds the repo.yarnpkg.com CLI url and rejects non-versions", () => {
-    assert.equal(
-      bumpYarn.yarnCliUrl("4.18.1"),
-      "https://repo.yarnpkg.com/4.18.1/packages/yarnpkg-cli/bin/yarn.js",
-    );
-    assert.throws(() => bumpYarn.yarnCliUrl("stable"), /refusing/);
-    assert.throws(() => bumpYarn.yarnCliUrl("4.18.1/../../etc"), /refusing/);
-  });
-});
-
 describe("installReleaseBins", () => {
   it("installs the fetched CLI, updates yarnPath, and keeps denylist binaries", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "yarn-install-"));

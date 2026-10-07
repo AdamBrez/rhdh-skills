@@ -57,7 +57,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for bin in node npm jq git; do
+for bin in node npm jq git curl; do
   command -v "$bin" >/dev/null || { echo "[ERROR] need ${bin}" >&2; exit 1; }
 done
 [[ -f "${BUMP_JS}" ]] || { echo "[ERROR] missing ${BUMP_JS}" >&2; exit 1; }
@@ -72,14 +72,23 @@ echo "[INFO] yarn bump to=${TO} branch=${BRANCH}"
 
 fetch_yarn_bin() {
   local dest="${WORKDIR}/yarn-${TO}.cjs"
+  local url="https://repo.yarnpkg.com/${TO}/packages/yarnpkg-cli/bin/yarn.js"
+  if [[ ! "${TO}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "[ERROR] refusing to fetch Yarn version ${TO}" >&2
+    exit 1
+  fi
   if [[ "${DRY_RUN}" -eq 1 ]]; then
-    echo "[INFO] dry-run: would fetch https://repo.yarnpkg.com/${TO}/packages/yarnpkg-cli/bin/yarn.js"
+    echo "[INFO] dry-run: would curl -fsSL ${url}"
     return 0
   fi
-  if node "${BUMP_JS}" --fetch-bin "${dest}" --to "${TO}"; then
+  if curl -fsSL --retry 3 -o "${dest}" "${url}" \
+    && [[ "$(head -c 19 "${dest}")" == "#!/usr/bin/env node" ]]; then
+    chmod +x "${dest}"
     YARN_BIN="${dest}"
+    echo "[INFO] fetched ${url}"
     return 0
   fi
+  rm -f "${dest}"
   echo "[WARN] Yarn CLI download failed; GitHub still runs yarn set version, GitLab copies a GitHub binary when one exists" >&2
   YARN_BIN=""
 }

@@ -12,13 +12,11 @@
  * --copy-bin remains a fallback that copies a binary already on disk.
  *
  *   bump-yarn.js --to 4.17.1 --root PATH... [--from V1,V2|--from-all] [--bin FILE|--copy-bin SRC]
- *   bump-yarn.js --fetch-bin DEST --to 4.17.1
  *   bump-yarn.js --scan --root PATH
  */
 "use strict";
 
 const fs = require("node:fs");
-const https = require("node:https");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
@@ -55,18 +53,15 @@ function parseArgs(argv) {
     locks: true,
     copyBin: null,
     bin: null,
-    fetchBin: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const x = argv[i];
     if (x === "-h" || x === "--help") {
       console.log(`Usage:
-  bump-yarn.js --fetch-bin DEST --to VER
   bump-yarn.js --to VER [--from ${DEFAULT_FROM.join(",")}|--from-all] --root PATH...
                [--bin FILE|--copy-bin GH_ROOT] [--scan|--dry-run|--no-refresh-locks]
 
   --from-all  bump every packageManager / yarn-*.cjs pin except DENYLIST ${[...DENYLIST].join(",")}
-  --fetch-bin download https://repo.yarnpkg.com/<VER>/packages/yarnpkg-cli/bin/yarn.js to DEST
   --bin       install that yarn-<to>.cjs into every bumped .yarn/releases (committed in the PR/MR)
   --copy-bin  copy yarn-<to>.cjs from a checkout into each --root when --bin is omitted`);
       process.exit(0);
@@ -84,7 +79,6 @@ function parseArgs(argv) {
     } else if (x === "--root") a.roots.push(path.resolve(argv[++i]));
     else if (x === "--copy-bin") a.copyBin = path.resolve(argv[++i]);
     else if (x === "--bin") a.bin = path.resolve(argv[++i]);
-    else if (x === "--fetch-bin") a.fetchBin = path.resolve(argv[++i]);
     else {
       console.error(`Unknown: ${x}`);
       process.exit(1);
@@ -268,56 +262,6 @@ function collectFromVersions(root, to) {
     if (v && v !== to && !DENYLIST.has(v)) versions.add(v);
   });
   return [...versions].toSorted(cmpStr);
-}
-
-function yarnCliUrl(to) {
-  if (!/^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(to)) {
-    throw new Error(`refusing to fetch Yarn version "${to}"`);
-  }
-  return `https://repo.yarnpkg.com/${to}/packages/yarnpkg-cli/bin/yarn.js`;
-}
-
-function downloadFile(url, dest, redirects = 0) {
-  return new Promise((resolve, reject) => {
-    if (redirects > 5) {
-      reject(new Error(`too many redirects for ${url}`));
-      return;
-    }
-    const req = https.get(url, (res) => {
-      const code = res.statusCode || 0;
-      if (code >= 300 && code < 400 && res.headers.location) {
-        res.resume();
-        const next = new URL(res.headers.location, url);
-        if (next.protocol !== "https:") {
-          reject(new Error(`refusing redirect to ${next.protocol}`));
-          return;
-        }
-        downloadFile(next.toString(), dest, redirects + 1).then(resolve, reject);
-        return;
-      }
-      if (code !== 200) {
-        res.resume();
-        reject(new Error(`GET ${url} -> ${code}`));
-        return;
-      }
-      const chunks = [];
-      res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => {
-        const buf = Buffer.concat(chunks);
-        const head = buf.subarray(0, 40).toString("utf8");
-        if (buf.length < 100000 || !head.startsWith("#!/usr/bin/env node")) {
-          reject(new Error(`payload from ${url} is not a Yarn CLI`));
-          return;
-        }
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        fs.writeFileSync(dest, buf);
-        chmodX(dest);
-        resolve(dest);
-      });
-      res.on("error", reject);
-    });
-    req.on("error", reject);
-  });
 }
 
 function assertYarnCli(binPath) {
@@ -534,17 +478,8 @@ function bump(root, { from, to, dryRun, locks, bin }) {
   return { pmDirs, extras, lockStats };
 }
 
-async function main() {
+function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.fetchBin) {
-    if (!args.to) {
-      console.error("--to VERSION required (exact, not stable)");
-      process.exit(1);
-    }
-    await downloadFile(yarnCliUrl(args.to), args.fetchBin);
-    console.log(`fetched ${args.fetchBin}`);
-    return;
-  }
   if (!args.roots.length) {
     console.error("Need --root PATH");
     process.exit(1);
@@ -582,7 +517,6 @@ module.exports = {
   DEFAULT_FROM,
   rewriteExtras,
   rewriteYarnPath,
-  yarnCliUrl,
   collectFromVersions,
   copyYarnBin,
   installReleaseBins,
@@ -590,9 +524,4 @@ module.exports = {
   parseArgs,
 };
 
-if (require.main === module) {
-  main().catch((err) => {
-    console.error(err instanceof Error ? err.message : err);
-    process.exit(1);
-  });
-}
+if (require.main === module) main();

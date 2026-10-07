@@ -42,7 +42,7 @@ When `package.json` defines `prettier:check` or `prettier:fix`, `yarn-bump.sh` r
 
 Plus pins Yarn cannot see: `ENV YARN=`, Containerfile / Dockerfile `yarn_version=` and literal `yarn set version` (including versions not in `--from`; denylist pins stay). `yarn set version $yarn_version` is left as a variable.
 
-`yarn-bump.sh` downloads the CLI once from `https://repo.yarnpkg.com/<to>/packages/yarnpkg-cli/bin/yarn.js` (the same URL `yarn set version` uses) and installs that file into every bumped `.yarn/releases` directory. GitHub PRs and GitLab MRs commit `yarn-<to>.cjs` (mode `100755`) plus the removed older binary. If the download fails, GitLab falls back to copying a binary produced by a GitHub bump.
+`yarn-bump.sh` runs `curl -fsSL` once against `https://repo.yarnpkg.com/<to>/packages/yarnpkg-cli/bin/yarn.js` (the same URL `yarn set version` uses) and installs that file into every bumped `.yarn/releases` directory. GitHub PRs and GitLab MRs commit `yarn-<to>.cjs` (mode `100755`) plus the removed older binary. If the download fails, GitLab falls back to copying a binary produced by a GitHub bump.
 
 ## Default path: yarn-bump.sh
 
@@ -61,7 +61,8 @@ GitLab weekly-maintenance clones this skill pack and runs `yarn-bump.sh` after d
 ```bash
 node "$SKILL/scripts/bump-yarn.js" --scan --root /path/to/repo
 node "$SKILL/scripts/bump-yarn.js" --to 4.18.1 --from-all --root /path/to/rhdh-plugins
-node "$SKILL/scripts/bump-yarn.js" --fetch-bin /tmp/yarn-4.18.1.cjs --to 4.18.1
+curl -fsSL -o /tmp/yarn-4.18.1.cjs \
+  https://repo.yarnpkg.com/4.18.1/packages/yarnpkg-cli/bin/yarn.js
 node "$SKILL/scripts/bump-yarn.js" --to 4.18.1 --bin /tmp/yarn-4.18.1.cjs \
   --from-all --root /path/to/rhdh-downstream
 ```
