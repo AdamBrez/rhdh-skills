@@ -24,6 +24,44 @@ describe("rewriteExtras", () => {
       "ENV YARN=/.yarn/releases/yarn-4.18.1.cjs\nyarn set version 4.18.1\n",
     );
   });
+
+  it("rewrites yarn_version and leaves the variable install line", () => {
+    const src =
+      'yarn_version="4.18.1" \\\nyarn set version $yarn_version; yarn -v; \\\n';
+    const out = bumpYarn.rewriteExtras(src, ["4.17.1"], "4.19.0");
+    assert.equal(
+      out,
+      'yarn_version="4.19.0" \\\nyarn set version $yarn_version; yarn -v; \\\n',
+    );
+  });
+
+  it("rewrites a literal yarn set version that is not in from", () => {
+    const out = bumpYarn.rewriteExtras(
+      "yarn set version 4.16.0\n",
+      ["4.17.1"],
+      "4.19.0",
+    );
+    assert.equal(out, "yarn set version 4.19.0\n");
+  });
+
+  it("keeps denylist yarn_version pins and single-quoted or bare assignments", () => {
+    const src =
+      "yarn_version=\"4.8.1\"\nyarn_version='4.9.2'\nyarn_version=4.15.0\n";
+    assert.equal(bumpYarn.rewriteExtras(src, ["4.17.1"], "4.19.0"), src);
+  });
+
+  it("keeps a yarn_version assignment that is already --to", () => {
+    const src = 'yarn_version="4.19.0"\nyarn set version 4.19.0\n';
+    assert.equal(bumpYarn.rewriteExtras(src, ["4.17.1"], "4.19.0"), src);
+  });
+
+  it("rewrites quoted and bare yarn_version assignments", () => {
+    const src = "yarn_version='4.17.1'\nyarn_version=4.14.1\n";
+    assert.equal(
+      bumpYarn.rewriteExtras(src, [], "4.19.0"),
+      "yarn_version='4.19.0'\nyarn_version=4.19.0\n",
+    );
+  });
 });
 
 describe("collectFromVersions", () => {

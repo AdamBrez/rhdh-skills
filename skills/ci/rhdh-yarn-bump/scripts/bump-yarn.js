@@ -204,18 +204,34 @@ function isExtra(full, base) {
   return base.endsWith(".sh") && /e2e|yarn/i.test(full);
 }
 
+const YARN_SEMVER = String.raw`\d{1,6}\.\d{1,6}\.\d{1,6}`;
+
+function keepPin(ver, to) {
+  return ver === to || DENYLIST.has(ver);
+}
+
 function rewriteExtras(text, from, to) {
   const alt = from.map(esc).join("|");
-  if (!alt) return text;
-  return text
-    .replace(
+  let next = text;
+  if (alt) {
+    next = next.replace(
       new RegExp(String.raw`yarn-(?:${alt})\.cjs`, "g"),
       `yarn-${to}.cjs`,
-    )
-    .replace(
-      new RegExp(String.raw`yarn set version (?:${alt})\b`, "g"),
-      `yarn set version ${to}`,
     );
+  }
+  // Literal install pins move to --to even when that version is not in --from
+  // (catalog builder.Containerfile can sit ahead of workspace pins).
+  // `yarn set version $yarn_version` does not match a semver, so it stays.
+  next = next.replace(
+    new RegExp(String.raw`yarn set version (${YARN_SEMVER})\b`, "g"),
+    (match, ver) => (keepPin(ver, to) ? match : `yarn set version ${to}`),
+  );
+  next = next.replace(
+    new RegExp(String.raw`yarn_version=(["']?)(${YARN_SEMVER})\1`, "g"),
+    (match, quote, ver) =>
+      keepPin(ver, to) ? match : `yarn_version=${quote}${to}${quote}`,
+  );
+  return next;
 }
 
 function resolveToBin(dir, to) {
