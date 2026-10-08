@@ -132,6 +132,9 @@ writes. Follow `/mutation-gate`.
   user does ask to open a PR/MR, invoke `/rhdh-pr-mr` by name after
   `/mutation-gate` approval; pass `--issue` when a Jira key is known, otherwise
   skip linking.
+- When this skill opens a PR or MR, include the Jira browse URL in the body when
+  a key is known (`https://redhat.atlassian.net/browse/<KEY>`), and always include
+  https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-konflux-tasks
 - When replacing a legacy task with `-oci-ta`, edit templates and shared
   pipelines first, then regenerate PLRs (or patch inline `pipelineSpec` PLRs by
   hand). Editing only PLRs leaves the source of truth stale.

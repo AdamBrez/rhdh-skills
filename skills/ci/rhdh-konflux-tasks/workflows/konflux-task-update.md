@@ -126,6 +126,8 @@ digest problem.
 
 Human reviews the full diff (digest commit plus any migration/regen commits), then `git push` or opens a PR.
 
+When this skill opens a PR or MR, include the Jira browse URL in the body when a key is known (`https://redhat.atlassian.net/browse/<KEY>`), and always include https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-konflux-tasks
+
 ## Known migration patterns
 
 Use live `MIGRATION.md` as source of truth. Common cases:
