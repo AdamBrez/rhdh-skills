@@ -40,6 +40,10 @@ SKILL=<this skill's directory>
 Default is `--no-open` (no browser). Pass `--open` only for interactive agent runs.
 `GITLAB_PIPELINE=true` forces no browser.
 
+The script appends ` [<base>]` to `--title` when that suffix is missing, including
+for `main` (`chore: short summary` becomes `chore: short summary [main]`). A
+title that already ends with the base branch is left as-is.
+
 Stdout includes `url: …`. Exit 0 if a PR/MR already exists for `--head`.
 
 ## Jira

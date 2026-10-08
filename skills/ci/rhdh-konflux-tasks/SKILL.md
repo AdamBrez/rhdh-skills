@@ -132,6 +132,9 @@ writes. Follow `/mutation-gate`.
   user does ask to open a PR/MR, invoke `/rhdh-pr-mr` by name after
   `/mutation-gate` approval; pass `--issue` when a Jira key is known, otherwise
   skip linking.
+- When this skill opens a PR or MR, end the title with the target branch in
+  brackets, for example `chore: update Konflux Tekton tasks [release-2.1]`.
+  Include `[main]` on `main`. `/rhdh-pr-mr` appends that suffix when it is missing.
 - When this skill opens a PR or MR, include the Jira browse URL in the body when
   a key is known (`https://redhat.atlassian.net/browse/<KEY>`), and always include
   https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-konflux-tasks
