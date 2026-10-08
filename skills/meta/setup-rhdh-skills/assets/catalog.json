@@ -238,6 +238,15 @@
       ]
     },
     {
+      "name": "rhdh-backport",
+      "category": "plugins",
+      "invocation": "model",
+      "requiresSkills": [
+        "mutation-gate"
+      ],
+      "requiresExternalSkills": []
+    },
+    {
       "name": "rhdh-base-images",
       "category": "ci",
       "invocation": "model",
