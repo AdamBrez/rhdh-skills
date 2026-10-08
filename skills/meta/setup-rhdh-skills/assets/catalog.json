@@ -234,7 +234,9 @@
       "name": "rhdh-backport",
       "category": "plugins",
       "invocation": "model",
-      "requiresSkills": [],
+      "requiresSkills": [
+        "mutation-gate"
+      ],
       "requiresExternalSkills": []
     },
     {

@@ -13,11 +13,18 @@ description: >
 <essential_principles>
 
 <principle name="script_driven">
-All mechanical work is done by `scripts/backport.py`. The agent's role is:
-1. Validate prerequisites
-2. Run the script
-3. Handle cherry-pick conflicts if the script exits with code 2
-4. Report results
+The script performs local preparation and read-only discovery. For every external
+write it emits a WRITE_PLAN file and waits on stdin. The agent's role is:
+1. Validate prerequisites, then invoke /mutation-gate for every WRITE_PLAN
+2. Run the credential scanner on the plan, render its exact target, command,
+   preview, precondition, failure behavior, and recovery as a conversation table
+3. Only after the user approves that specific plan, send the printed
+   WRITE_APPROVAL line to the still-running script via stdin
+4. If approval is denied, send a line other than WRITE_APPROVAL so the
+   process exits; report that write and later writes as skipped. If the
+   precondition changed, prepare a new plan
+5. Handle cherry-pick conflicts if the script exits with code 2
+6. Report each write receipt, including failures and skipped operations
 </principle>
 
 <principle name="ai_conflict_resolution">
@@ -83,7 +90,10 @@ See `references/ai-conflict-resolution.md` for detailed resolution strategies.
 
 ### auto (default) — Full workflow
 
-Runs all 11 steps end-to-end. Zero intervention required.
+Runs all 11 steps, pausing before each external write for the approval above.
+Later PR numbers and workflow results are discovered at runtime, so approval for
+the first push cannot approve the later merges or /publish comment. Keep stdin
+attached in an interactive terminal; never pipe an automatic approval string.
 
 ```bash
 python scripts/backport.py <release> <pr_source> --mode auto
@@ -255,7 +265,6 @@ is not used for backports.
 | `--continue-from FILE` | Resume after conflict resolution |
 | `--force` | Skip already-backported check |
 | `--json` | Structured JSON output to stdout |
-| `--auto-approve` | Skip confirmation prompts |
 | `--repo REPO` | Override plugins repo |
 | `--overlays-repo REPO` | Override overlays repo |
 

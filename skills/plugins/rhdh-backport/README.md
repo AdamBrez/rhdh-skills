@@ -31,7 +31,7 @@ VP, overlays, and changelog run for both models. Only the target branch shape di
 
 | Mode | Steps | Use when |
 |------|-------|----------|
-| `auto` (default) | 1-11 | Full hands-off backport |
+| `auto` (default) | 1-11 | Full sequence, pausing for each external-write approval |
 | `create` | 1-7 | Want to review PR before merging |
 | `finish` | 8-11 | After manually merging the backport PR |
 

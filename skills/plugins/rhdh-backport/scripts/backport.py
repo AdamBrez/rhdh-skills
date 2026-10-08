@@ -19,9 +19,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -169,6 +171,195 @@ def restore_git_state(original_branch: str, had_changes: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# External write approval
+# ---------------------------------------------------------------------------
+
+
+def _read_command(args: list[str]) -> str:
+    result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+    if result.returncode:
+        die(f"Could not check write precondition: {shlex.join(args)}\n{result.stderr.strip()}")
+    return result.stdout
+
+
+def _arg(args: list[str], flag: str, default: str = "") -> str:
+    return args[args.index(flag) + 1] if flag in args else default
+
+
+def _gh_write(args: list[str]) -> bool:
+    if args[:2] in (
+        ["pr", "create"],
+        ["pr", "merge"],
+        ["pr", "edit"],
+        ["pr", "comment"],
+        ["workflow", "run"],
+    ):
+        return True
+    if args[:1] == ["api"]:
+        return _arg(args, "--method", "GET") != "GET"
+    if args[:2] in (
+        ["pr", "view"],
+        ["pr", "list"],
+        ["pr", "diff"],
+        ["run", "list"],
+    ):
+        return False
+    die(f"Unclassified gh command; add a write plan or read-only classification: {args}")
+    return False
+
+
+def _write_plan(cmd: list[str]) -> tuple[dict, dict]:
+    """Build one exact, credential-free mutation plan and its live precondition."""
+    kind = cmd[0]
+    args = cmd[1:]
+    plan = {
+        "command": shlex.join(cmd),
+        "on_failure": "Stop this run; report this operation failed and later writes skipped.",
+    }
+
+    if kind == "git":
+        remote, branch = args[1:3]
+        local_sha = _read_command(["git", "rev-parse", branch]).strip()
+        remote_line = _read_command(
+            ["git", "ls-remote", "--heads", remote, f"refs/heads/{branch}"]
+        ).strip()
+        remote_sha = remote_line.split()[0] if remote_line else ""
+        precondition = {"local_sha": local_sha, "remote_sha": remote_sha}
+        if remote_sha:
+            _read_command(["git", "fetch", remote, branch])
+            preview = _read_command(["git", "diff", remote_sha, local_sha])
+            recovery = f"Restore refs/heads/{branch} on {remote} to {remote_sha} with a reviewed revert or ref update."
+        else:
+            preview = _read_command(["git", "show", "--format=fuller", local_sha])
+            recovery = f"Delete newly created refs/heads/{branch} on {remote} after checking for consumers."
+        plan.update(target=f"{remote}:refs/heads/{branch}", preview=preview, recovery=recovery)
+
+    elif args[:2] == ["pr", "create"]:
+        repo = _arg(args, "--repo")
+        base = _arg(args, "--base")
+        head = _arg(args, "--head")
+        branch = head.split(":", 1)[-1]
+        remote_line = _read_command(
+            ["git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}"]
+        ).strip()
+        if not remote_line:
+            die(f"PR head branch is not on origin: {branch}")
+        base_ref = json.loads(_read_command(["gh", "api", f"repos/{repo}/git/ref/heads/{base}"]))
+        precondition = {
+            "head_sha": remote_line.split()[0],
+            "base_sha": base_ref["object"]["sha"],
+        }
+        plan.update(
+            target=f"{repo}: {head} -> {base}",
+            preview={"title": _arg(args, "--title"), "body": _arg(args, "--body")},
+            recovery="Close the new PR; the pushed branch needs separate cleanup.",
+        )
+
+    elif args[:2] in (["pr", "merge"], ["pr", "edit"], ["pr", "comment"]):
+        number = args[2]
+        repo = _arg(args, "--repo")
+        precondition = json.loads(
+            _read_command(
+                [
+                    "gh",
+                    "pr",
+                    "view",
+                    number,
+                    "--repo",
+                    repo,
+                    "--json",
+                    "headRefOid,baseRefOid,state,mergeStateStatus,statusCheckRollup,labels",
+                ]
+            )
+        )
+        if precondition["state"] != "OPEN":
+            die(f"PR is no longer open: {repo}#{number}")
+        if args[1] == "merge":
+            preview = _read_command(["gh", "pr", "diff", number, "--repo", repo])
+            recovery = "Revert the resulting merge commit in a separate reviewed PR."
+        elif args[1] == "edit":
+            preview = {"add_label": _arg(args, "--add-label")}
+            recovery = (
+                f"Remove the label from {repo}#{number} only if it was absent "
+                "before this operation."
+            )
+        else:
+            preview = {"comment": _arg(args, "--body")}
+            recovery = "The posted comment cannot be undone; post a correction if needed."
+        plan.update(target=f"{repo}#{number}", preview=preview, recovery=recovery)
+
+    elif args[:2] == ["workflow", "run"]:
+        repo = _arg(args, "--repo")
+        branch_input = _arg(args, "-f")
+        if not branch_input.startswith("single-branch="):
+            die(f"Unexpected workflow inputs: {branch_input}")
+        branch = branch_input.split("=", 1)[1]
+        ref = f"repos/{repo}/git/ref/heads/{branch}"
+        precondition = json.loads(_read_command(["gh", "api", ref]))
+        plan.update(
+            target=f"{repo} Actions workflow {args[2]}",
+            preview={"inputs": branch_input},
+            recovery="A dispatched workflow cannot be undone; stop or cancel its run if still active.",
+        )
+
+    elif args[:1] == ["api"] and _arg(args, "--method") == "DELETE":
+        endpoint = args[-1]
+        precondition = json.loads(_read_command(["gh", "api", endpoint]))
+        old_sha = precondition["object"]["sha"]
+        plan.update(
+            target=endpoint,
+            preview={"delete_ref_at_sha": old_sha},
+            recovery=f"Recreate {endpoint} at {old_sha} after checking no newer ref replaced it.",
+        )
+
+    else:
+        die(f"No write plan builder for: {shlex.join(cmd)}")
+
+    plan["precondition"] = precondition
+    return plan, precondition
+
+
+def _approve_write(cmd: list[str]) -> None:
+    plan, precondition = _write_plan(cmd)
+    material = json.dumps(plan, sort_keys=True)
+    digest = hashlib.sha256(material.encode()).hexdigest()[:16]
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix="rhdh-backport-write-",
+        suffix=".json",
+        delete=False,
+    ) as plan_file:
+        json.dump(plan, plan_file, indent=2)
+        plan_path = plan_file.name
+    log(f"WRITE_PLAN={plan_path}")
+    log(f"WRITE_APPROVAL=approve {digest}")
+    log("Waiting for agent to show the plan under /mutation-gate and request approval.")
+    if sys.stdin.readline().strip() != f"approve {digest}":
+        log(f"WRITE_RESULT=skipped target={plan['target']} reason=not approved")
+        die("External write was not approved; later writes skipped.")
+    _, current = _write_plan(cmd)
+    if current != precondition:
+        log(f"WRITE_RESULT=skipped target={plan['target']} reason=precondition changed")
+        die("Write target changed after approval; prepare a new plan.")
+    log(f"WRITE_APPROVED={plan['target']}")
+
+
+def _report_write(cmd: list[str], result: subprocess.CompletedProcess[str]) -> None:
+    log(
+        json.dumps(
+            {
+                "write_result": "completed" if result.returncode == 0 else "failed",
+                "command": shlex.join(cmd),
+                "exit_code": result.returncode,
+            }
+        )
+    )
+    if result.returncode:
+        die("External write failed; later writes skipped.")
+
+
+# ---------------------------------------------------------------------------
 # Subprocess helpers
 # ---------------------------------------------------------------------------
 
@@ -180,6 +371,9 @@ def run_gh(
     timeout: int = 60,
 ) -> subprocess.CompletedProcess[str]:
     cmd = ["gh"] + args
+    write = _gh_write(args)
+    if write:
+        _approve_write(cmd)
     try:
         result = subprocess.run(
             cmd,
@@ -191,6 +385,8 @@ def run_gh(
         die("gh CLI not found. Install from https://cli.github.com/")
     except subprocess.TimeoutExpired:
         die(f"gh command timed out ({timeout}s): {' '.join(cmd)}")
+    if write:
+        _report_write(cmd, result)
     if check and result.returncode != 0:
         die(f"gh failed: {' '.join(cmd)}\n{result.stderr.strip()}")
     return result
@@ -216,6 +412,9 @@ def run_git(
     timeout: int = 120,
 ) -> subprocess.CompletedProcess[str]:
     cmd = ["git"] + args
+    write = args[:1] == ["push"]
+    if write:
+        _approve_write(cmd)
     try:
         result = subprocess.run(
             cmd,
@@ -228,6 +427,8 @@ def run_git(
         die("git not found.")
     except subprocess.TimeoutExpired:
         die(f"git command timed out ({timeout}s): {' '.join(cmd)}")
+    if write:
+        _report_write(cmd, result)
     if check and result.returncode != 0:
         die(f"git failed: {' '.join(cmd)}\n{result.stderr.strip()}")
     return result
@@ -317,11 +518,6 @@ Examples:
     )
     parser.add_argument("--repo", default=DEFAULT_REPO)
     parser.add_argument("--overlays-repo", default=DEFAULT_OVERLAYS_REPO)
-    parser.add_argument(
-        "--auto-approve",
-        action="store_true",
-        help="Skip confirmation prompts",
-    )
     parser.add_argument(
         "--continue-from",
         dest="continue_from",
@@ -830,6 +1026,9 @@ def poll_ci(
 
 def merge_pr(pr_num: int, repo: str) -> None:
     log(f"  Merging PR #{pr_num}...")
+    head = run_gh_json(["pr", "view", str(pr_num), "--repo", repo, "--json", "headRefOid"])[
+        "headRefOid"
+    ]
     run_gh(
         [
             "pr",
@@ -838,7 +1037,8 @@ def merge_pr(pr_num: int, repo: str) -> None:
             "--repo",
             repo,
             "--squash",
-            "--auto",
+            "--match-head-commit",
+            head,
         ]
     )
 

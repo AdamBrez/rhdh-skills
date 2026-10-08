@@ -1,5 +1,6 @@
 """Unit tests for skills/backport/scripts/backport.py."""
 
+import io
 import subprocess
 import sys
 from pathlib import Path
@@ -420,3 +421,72 @@ class TestParsePrSource:
     def test_invalid_exits(self):
         with pytest.raises(SystemExit):
             backport.parse_pr_source("not-valid!")
+
+
+class TestExternalWriteGate:
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["pr", "create", "--repo", "owner/repo"],
+            ["pr", "merge", "42", "--repo", "owner/repo"],
+            ["pr", "edit", "42", "--repo", "owner/repo"],
+            ["pr", "comment", "42", "--repo", "owner/repo"],
+            ["workflow", "run", "update.yml", "--repo", "owner/repo"],
+            ["api", "--method", "DELETE", "repos/owner/repo/git/refs/heads/stale"],
+        ],
+    )
+    def test_gh_write_never_executes_before_approval(self, args):
+        with (
+            patch.object(backport, "_approve_write", side_effect=SystemExit(1)) as gate,
+            patch.object(backport.subprocess, "run") as execute,
+            pytest.raises(SystemExit),
+        ):
+            backport.run_gh(args)
+        gate.assert_called_once()
+        execute.assert_not_called()
+
+    def test_git_push_never_executes_before_approval(self):
+        with (
+            patch.object(backport, "_approve_write", side_effect=SystemExit(1)) as gate,
+            patch.object(backport.subprocess, "run") as execute,
+            pytest.raises(SystemExit),
+        ):
+            backport.run_git(["push", "origin", "backport/example"])
+        gate.assert_called_once()
+        execute.assert_not_called()
+
+    def test_read_only_gh_still_executes(self):
+        with (
+            patch.object(backport, "_approve_write") as gate,
+            patch.object(
+                backport.subprocess, "run", return_value=_completed_process("{}")
+            ) as execute,
+        ):
+            backport.run_gh(["pr", "view", "42"])
+        gate.assert_not_called()
+        execute.assert_called_once()
+
+    def test_changed_precondition_blocks_even_after_approval(self):
+        plan = {
+            "target": "owner/repo#42",
+            "command": "gh pr merge 42",
+            "preview": "diff",
+            "precondition": {"head": "old"},
+            "on_failure": "Stop",
+            "recovery": "Revert",
+        }
+        digest = backport.hashlib.sha256(
+            backport.json.dumps(plan, sort_keys=True).encode()
+        ).hexdigest()[:16]
+        with (
+            patch.object(
+                backport,
+                "_write_plan",
+                side_effect=[(plan, {"head": "old"}), (plan, {"head": "new"})],
+            ),
+            patch.object(backport.sys, "stdin", io.StringIO(f"approve {digest}\n")),
+            patch.object(backport.subprocess, "run") as execute,
+            pytest.raises(SystemExit),
+        ):
+            backport.run_gh(["pr", "merge", "42"])
+        execute.assert_not_called()
