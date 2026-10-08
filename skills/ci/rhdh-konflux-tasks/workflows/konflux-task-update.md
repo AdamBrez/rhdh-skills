@@ -126,7 +126,7 @@ digest problem.
 
 Human reviews the full diff (digest commit plus any migration/regen commits), then `git push` or opens a PR.
 
-When this skill opens a PR or MR, end the title with the target branch in brackets (`chore: update Konflux Tekton tasks [release-2.1]`, including `[main]`). `/rhdh-pr-mr` appends that suffix when it is missing. Always include https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-konflux-tasks in the body. Add a Jira browse URL (`https://redhat.atlassian.net/browse/<KEY>`) and pass `--issue` only when the user supplied a key for this run. Do not look one up. When no key was supplied, omit the Jira line and do not pass `--issue`.
+When this skill opens a PR or MR, end the title with the target branch in brackets (`chore: update Konflux Tekton tasks [release-2.1]`, including `[main]`). `/rhdh-pr-mr` appends that suffix when it is missing. Always include https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-konflux-tasks in the body. Before opening, ask which Jira key to cite. If the user gives a key, add `https://redhat.atlassian.net/browse/<KEY>` and pass `--issue`. If they omit it or say "no jira", omit the Jira line and do not pass `--issue`. Do not look a key up and do not invent one.
 
 ## Known migration patterns
 
