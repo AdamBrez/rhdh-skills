@@ -18,6 +18,7 @@ SKIP_RPM=0
 DRY_RUN=0
 ANALYZE=0
 ALLOW_DIRTY=0
+CATALOG_BRANCH_FOR=""
 BASE_IMAGE_ARGS=(--pr --no-push)
 
 GITLAB_SCRIPTS_BASE="https://gitlab.cee.redhat.com/rhidp/rhdh/-/raw"
@@ -45,6 +46,7 @@ Repo selection (default: all three under --parent-dir, or current directory if i
 
 Workflow:
   --analyze                 Read-only scan (current vs latest tags, UBI skew); no -b required
+  --catalog-branch-for B    Print plugin-catalog git branch for GitHub selector B and exit
   --skip-base               Skip updateBaseImages.sh
   --skip-rpm                Skip rpm-lockfile-prototype
   --dirty                   Pass --dirty to updateBaseImages.sh
@@ -54,6 +56,7 @@ Workflow:
 
 Examples:
   base-images-and-rpms.sh --analyze --parent-dir ~/RHDH
+  base-images-and-rpms.sh --catalog-branch-for release-1.10
   base-images-and-rpms.sh -b release-1.10 --parent-dir ~/RHDH/
   base-images-and-rpms.sh -b main \
     --update-base-images-script ~/src/rhdh/build/scripts/updateBaseImages.sh \
@@ -73,6 +76,48 @@ log() {
 
 warn() {
     echo "[WARN] $*" >&2
+}
+
+SKILL_MD_URL="https://github.com/redhat-developer/rhdh-skills/blob/main/skills/ci/rhdh-base-images/SKILL.md"
+
+# Default bot PR body for skill-driven updates (agent or CI). Callers may
+# pre-set CREATE_PR_BODY to override; weekly leaves it unset and comments
+# GitLab provenance separately.
+default_create_pr_body() {
+    local branch="${1:-main}"
+    cat <<EOF
+## Summary
+
+Automated base-image maintenance for branch \`${branch}\`.
+
+This PR was opened by the **rhdh-base-images** skill
+(\`base-images-and-rpms.sh\`), a **governed, AI-assisted automation pipeline**
+that keeps UBI \`FROM\` bumps in lockstep with \`rpms.lock.yaml\`, Node headers
+(\`.nvmrc\` / \`node-v*-headers.tar.gz\`), operator \`go.mod\` (main),
+plugin-catalog builder pins, and overlays \`versions.json\` \`node\` when those
+checkouts are in scope.
+
+## Agentic SDLC
+
+This change is part of an **agentic SDLC** path for platform hygiene: an
+**AI coding skill** (\`rhdh-base-images\`) encodes the playbook that humans
+previously ran by hand, so dependency drift (base image → RPM → Node/Go) is
+closed in **one automergeable PR** instead of staggered bot PRs. The skill is
+reviewed and executed with explicit checkouts — **governed, AI-assisted
+automation** that augments the software delivery lifecycle with repeatable,
+auditable automation rather than replacing human merge judgment
+(\`lgtm\` / \`approved\` still apply).
+
+See the skill README: ${SKILL_MD_URL}
+EOF
+}
+
+ensure_create_pr_body() {
+    local branch="${1:-main}"
+    if [[ -z "${CREATE_PR_BODY:-}" ]]; then
+        CREATE_PR_BODY=$(default_create_pr_body "${branch}")
+        export CREATE_PR_BODY
+    fi
 }
 
 validate_branch() {
@@ -146,9 +191,32 @@ rhdh_nodejs_containerfile() {
     fi
 }
 
+# Operator images: release-1.* still uses .rhdh/docker/Dockerfile.
+# main, release-2.*, and later use root Dockerfile (or Containerfile).
+operator_dockerfile_rel() {
+    local repo_dir="$1"
+    local branch="${2:-}"
+    if [[ "${branch}" == release-1.* || "${branch}" == rhdh-1.* ]]; then
+        if [[ -f "${repo_dir}/.rhdh/docker/Dockerfile" ]]; then
+            echo ".rhdh/docker/Dockerfile"
+            return 0
+        fi
+    fi
+    if [[ -f "${repo_dir}/Dockerfile" ]]; then
+        echo "Dockerfile"
+    elif [[ -f "${repo_dir}/Containerfile" ]]; then
+        echo "Containerfile"
+    elif [[ -f "${repo_dir}/.rhdh/docker/Dockerfile" ]]; then
+        echo ".rhdh/docker/Dockerfile"
+    else
+        die "${repo_dir}: no operator Dockerfile (tried Dockerfile, Containerfile, .rhdh/docker/Dockerfile)"
+    fi
+}
+
 rpm_containerfile_for() {
     local repo_dir="$1"
     local kind="$2"
+    local branch="${3:-}"
     case "${kind}" in
         rhdh)
             if [[ -f "${repo_dir}/build/containerfiles/Containerfile" ]]; then
@@ -159,7 +227,7 @@ rpm_containerfile_for() {
                 die "${repo_dir}: no RPM containerfile found for rhdh"
             fi
             ;;
-        rhdh-operator) echo ".rhdh/docker/Dockerfile" ;;
+        rhdh-operator) operator_dockerfile_rel "${repo_dir}" "${branch}" ;;
         rhdh-must-gather) echo "Containerfile" ;;
         rhdh-plugin-catalog | rhdh-plugin-export-overlays)
             die "${repo_dir}: ${kind} has no rpms.lock.yaml"
@@ -319,7 +387,7 @@ update_rpm_lockfile() {
     local rpm_tool="$3"
     local branch="$4"
     local containerfile rpm_err rpm_rc
-    containerfile=$(rpm_containerfile_for "${repo_dir}" "${kind}")
+    containerfile=$(rpm_containerfile_for "${repo_dir}" "${kind}" "${branch}")
 
     [[ -f "${repo_dir}/${containerfile}" ]] || die "${repo_dir}: missing ${containerfile}"
     [[ -f "${repo_dir}/rpms.in.yaml" ]] || die "${repo_dir}: missing rpms.in.yaml"
@@ -419,7 +487,10 @@ commit_push_paths() {
     fi
 
     git commit -s -m "${message}"
-    git push -u origin "${push_branch}"
+    if ! git push -u origin "${push_branch}"; then
+        warn "git push failed for origin/${push_branch}; commit remains local"
+        return 0
+    fi
     log "Pushed ${message} to origin/${push_branch}"
 
     if [[ "${push_branch}" == chore/automated-update-rpm-lockfile/* ]] \
@@ -429,7 +500,7 @@ commit_push_paths() {
             --base "${branch}" \
             --head "${push_branch}" \
             --title "chore: update RPM lockfile in branch (${branch}) [skip-build]" \
-            --body "Automated RPM lockfile refresh from base-images-and-rpms.sh." \
+            --body "${CREATE_PR_BODY}" \
             2>/dev/null \
             || warn "Could not open RPM lockfile PR for ${push_branch}"
     fi
@@ -446,6 +517,113 @@ node_version_from_image() {
     local runner=podman
     command -v podman >/dev/null 2>&1 || runner=docker
     "${runner}" run --rm --entrypoint node "${image}" --version 2>/dev/null | tr -d '\n\r'
+}
+
+container_runtime() {
+    if command -v podman >/dev/null 2>&1; then
+        echo podman
+    elif command -v docker >/dev/null 2>&1; then
+        echo docker
+    fi
+}
+
+# builder.Containerfile runs `dnf install nodejs` before `node --version` for headers.
+catalog_dnf_installs_nodejs_before_headers() {
+    local catalog_cf="$1"
+    awk '
+        /^RUN NODE_HEADERS_VERSION=/ { exit }
+        /dnf/ && /nodejs/ { found = 1 }
+        END { exit found ? 0 : 1 }
+    ' "${catalog_cf}"
+}
+
+nodejs_stream_major_from_image() {
+    local image="$1"
+    if [[ "${image}" =~ nodejs-([0-9]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+    fi
+}
+
+# Plain X.Y.Z of the newest nodejs RPM the image can install for that module stream.
+nodejs_rpm_version_in_image() {
+    local image="$1"
+    local major="$2"
+    local runner out
+    runner=$(container_runtime)
+    [[ -n "${runner}" && -n "${major}" ]] || return 0
+    out=$("${runner}" run --rm --user 0 --entrypoint bash "${image}" -lc \
+        "dnf module enable nodejs:${major} -y >/dev/null && dnf repoquery -q --latest-limit 1 nodejs" \
+        2>/dev/null) || return 0
+    printf '%s\n' "${out}" | python3 -c '
+import re
+import sys
+
+versions = set()
+for line in sys.stdin:
+    match = re.search(r"nodejs-(?:[0-9]+:)?([0-9]+\.[0-9]+\.[0-9]+)-", line)
+    if match:
+        versions.add(match.group(1))
+if not versions:
+    raise SystemExit(0)
+
+def sort_key(version):
+    return tuple(int(part) for part in version.split("."))
+
+print(max(versions, key=sort_key))
+'
+}
+
+# Newer of two Node versions (v-prefix optional). Empty input is ignored.
+newer_node_plain() {
+    local left="${1#v}"
+    local right="${2#v}"
+    if [[ -z "${left}" ]]; then
+        printf '%s\n' "${right}"
+        return 0
+    fi
+    if [[ -z "${right}" ]]; then
+        printf '%s\n' "${left}"
+        return 0
+    fi
+    printf '%s\n%s\n' "${left}" "${right}" | sort -V | tail -n1
+}
+
+# Headers version the catalog builder will see: image node, or a newer dnf nodejs RPM.
+catalog_headers_plain_version() {
+    local catalog_cf="$1"
+    local image="$2"
+    local image_version="" rpm_version="" major=""
+    image_version=$(node_version_from_image "${image}") || true
+    image_version="${image_version#v}"
+    if catalog_dnf_installs_nodejs_before_headers "${catalog_cf}"; then
+        major=$(nodejs_stream_major_from_image "${image}")
+        rpm_version=$(nodejs_rpm_version_in_image "${image}" "${major}") || true
+        if [[ -n "${rpm_version}" ]]; then
+            log "plugin-catalog: dnf nodejs ${rpm_version} (image node ${image_version:-unknown})"
+        else
+            warn "plugin-catalog: could not repoquery nodejs in ${image}; using image node ${image_version:-unknown}"
+        fi
+    fi
+    newer_node_plain "${image_version}" "${rpm_version}"
+}
+
+ensure_node_headers_files() {
+    local node_plain="$1"
+    local headers_file=".nvm/releases/node-v${node_plain}-headers.tar.gz"
+    local readme_file=".nvm/releases/README.adoc"
+    local current_nvmrc=""
+    mkdir -p .nvm/releases
+    [[ -f .nvmrc ]] && current_nvmrc=$(tr -d '\n\r' < .nvmrc)
+    if [[ ! -f "${headers_file}" ]]; then
+        curl -fsSL "https://nodejs.org/dist/v${node_plain}/node-v${node_plain}-headers.tar.gz" \
+            -o "${headers_file}"
+    fi
+    if [[ "${current_nvmrc}" != "${node_plain}" ]] \
+        || ! nvm_readme_documents_version "${readme_file}" "v${node_plain}"; then
+        echo "${node_plain}" > .nvmrc
+        update_nvm_releases_readme "${readme_file}" "v${node_plain}"
+    fi
+    remove_stale_header_tarballs "${headers_file}"
 }
 
 update_nvm_releases_readme() {
@@ -608,34 +786,62 @@ update_plugin_catalog_node() {
     local catalog_cf="${repo_dir}/build/containerfiles/builder.Containerfile"
     [[ -f "${catalog_cf}" ]] || return 0
 
-    local src_image="" node_plain="" headers_file
+    local src_image="" node_plain="" rhdh_plain="" headers_file
     if [[ -n "${rhdh_src}" && -f "${rhdh_src}/.nvmrc" ]]; then
         src_image=$(rhdh_nodejs_builder_image "$(rhdh_nodejs_containerfile "${rhdh_src}")")
-        node_plain=$(tr -d '\n\r' < "${rhdh_src}/.nvmrc")
+        rhdh_plain=$(tr -d '\n\r' < "${rhdh_src}/.nvmrc")
     fi
 
     if [[ ${DRY_RUN} -eq 1 ]]; then
-        echo "  dry-run: pin ${catalog_cf} FROM to rhdh UBI node image; copy .nvm/; rewrite konflux.additional-tags node-v*"
+        echo "  dry-run: pin ${catalog_cf} FROM to rhdh UBI node image"
+        echo "  dry-run: headers from image node --version, or newer dnf repoquery nodejs when the builder dnf-installs nodejs"
+        echo "  dry-run: skip copying an older rhdh .nvm/; rewrite konflux.additional-tags node-v*"
+        return 0
+    fi
+
+    if ! command -v podman >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
+        warn "plugin-catalog: podman or docker required to resolve node headers; skipping"
         return 0
     fi
 
     pushd "${repo_dir}" >/dev/null
     if [[ -n "${src_image}" ]]; then
         pin_catalog_builder_from "${catalog_cf}" "${src_image}"
-        copy_nvm_tree "${rhdh_src}" "${repo_dir}"
-    else
-        log "plugin-catalog: no rhdh checkout in this run; refreshing headers from catalog FROM"
-        update_rhdh_node_headers "${repo_dir}" "${git_branch}"
-        [[ -f .nvmrc ]] && node_plain=$(tr -d '\n\r' < .nvmrc)
     fi
 
-    if [[ -n "${node_plain}" ]]; then
-        rewrite_catalog_additional_tags "${catalog_cf}" "${node_plain}"
-        headers_file=".nvm/releases/node-v${node_plain}-headers.tar.gz"
-        remove_stale_header_tarballs "${headers_file}"
-        commit_push_paths "${git_branch}" "chore: pin catalog builder to Node v${node_plain}" \
-            .nvmrc "${headers_file}" .nvm/releases/README.adoc "${catalog_cf}"
+    local catalog_image
+    catalog_image=$(rhdh_nodejs_builder_image "${catalog_cf}")
+    if [[ -z "${catalog_image}" ]]; then
+        warn "plugin-catalog: no ubi*/nodejs FROM in ${catalog_cf}"
+        popd >/dev/null
+        return 0
     fi
+
+    node_plain=$(catalog_headers_plain_version "${catalog_cf}" "${catalog_image}")
+    if [[ -z "${node_plain}" ]]; then
+        warn "plugin-catalog: could not resolve a Node headers version from ${catalog_image}"
+        popd >/dev/null
+        return 0
+    fi
+
+    if [[ -n "${rhdh_src}" && -n "${rhdh_plain}" ]]; then
+        if [[ "$(newer_node_plain "${rhdh_plain}" "${node_plain}")" == "${rhdh_plain}" ]]; then
+            copy_nvm_tree "${rhdh_src}" "${repo_dir}"
+            node_plain="${rhdh_plain}"
+        else
+            log "plugin-catalog: rhdh headers ${rhdh_plain} are older than builder nodejs ${node_plain}; not copying them"
+            if [[ -f "${rhdh_src}/.nvm/releases/README.adoc" && ! -f .nvm/releases/README.adoc ]]; then
+                mkdir -p .nvm/releases
+                /bin/cp -f "${rhdh_src}/.nvm/releases/README.adoc" .nvm/releases/README.adoc
+            fi
+        fi
+    fi
+
+    ensure_node_headers_files "${node_plain}"
+    rewrite_catalog_additional_tags "${catalog_cf}" "${node_plain}"
+    headers_file=".nvm/releases/node-v${node_plain}-headers.tar.gz"
+    commit_push_paths "${git_branch}" "chore: pin catalog builder to Node v${node_plain}" \
+        .nvmrc "${headers_file}" .nvm/releases/README.adoc "${catalog_cf}"
     popd >/dev/null
 }
 
@@ -706,7 +912,9 @@ go_version_gte() {
 update_operator_go_mod() {
     local repo_dir="$1"
     local branch="$2"
-    local dockerfile="${repo_dir}/.rhdh/docker/Dockerfile"
+    local dockerfile
+    dockerfile=$(operator_dockerfile_rel "${repo_dir}" "${branch}")
+    dockerfile="${repo_dir}/${dockerfile}"
 
     if [[ "${branch}" != "main" ]]; then
         log "Go toolchain: skipping go.mod update on ${branch} (main only)"
@@ -846,6 +1054,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run) DRY_RUN=1; shift ;;
         --analyze) ANALYZE=1; shift ;;
+        --catalog-branch-for) CATALOG_BRANCH_FOR="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
         -*) die "Unknown option: $1 (try --help)" ;;
@@ -862,6 +1071,12 @@ while [[ $# -gt 0 ]]; do
     REPO_DIRS+=("$1")
     shift
 done
+
+# Pure mapper for callers (e.g. weekly-maintenance) — no repo checkouts required.
+if [[ -n "${CATALOG_BRANCH_FOR}" ]]; then
+    catalog_git_branch_for "${CATALOG_BRANCH_FOR}"
+    exit 0
+fi
 
 if [[ ${ANALYZE} -eq 0 ]]; then
     [[ -n "${BRANCH}" ]] || { usage; exit 1; }
@@ -886,6 +1101,10 @@ if [[ ${ANALYZE} -eq 1 ]]; then
     run_analyze "${SCRIPTS_BRANCH}"
     exit 0
 fi
+
+# Export default agentic PR body for createPR.sh / gh pr create unless the caller
+# already set CREATE_PR_BODY (weekly leaves it unset and comments provenance).
+ensure_create_pr_body "${BRANCH}"
 
 if [[ ${SKIP_BASE} -eq 0 ]]; then
     ensure_tools jq skopeo curl

@@ -29,8 +29,8 @@
 
 - Clone: `https://gitlab.cee.redhat.com/rhidp/rhdh-plugin-catalog.git`
 - GitHub `-b main` → catalog `main`; `-b release-1.Y` → `rhdh-1.Y-rhel-9`; `-b release-2.Y` → `release-2.Y`
-- Pin `build/containerfiles/builder.Containerfile` FROM to the same UBI Node `tag@sha256` as GitHub rhdh. RHDH 1.y uses RHEL9; RHDH 2.y uses RHEL 20. Prefer `major.minor-buildid`; numeric-only tags often 404.
-- Copy matching `.nvmrc`, `node-v*-headers.tar.gz`, and `.nvm/releases/README.adoc` from the rhdh checkout. Rewrite only the `node-v*` token in `LABEL konflux.additional-tags=...`.
+- Pin `build/containerfiles/builder.Containerfile` FROM to the same UBI Node `tag@sha256` as GitHub rhdh. RHDH 1.y uses RHEL9; RHDH 2.y uses RHEL 10. Prefer `major.minor-buildid`; numeric-only tags often 404.
+- Headers version is the image `node --version`, or the newer `nodejs` NEVRA from `podman run --user 0` + `dnf module enable nodejs:<major>` + `dnf repoquery -q --latest-limit 1 nodejs`, when the Containerfile `dnf`-installs `nodejs` before the headers `RUN`. Copy rhdh `.nvmrc`, `node-v*-headers.tar.gz`, and `.nvm/releases/README.adoc` only when rhdh is at least that version. Rewrite only the `node-v*` token in `LABEL konflux.additional-tags=...`.
 - No `rpms.lock.yaml`. Do not `[skip-build]` when FROM or headers change.
 - Markers: `build/containerfiles/builder.Containerfile`, `.nvmrc`, and `.tekton/updatePLRs.sh` (or deprecated `generatePipelineRunsForPlugins.sh` on 1.9/1.10)
 

@@ -46,6 +46,12 @@ opening PRs are each their own operation. Default to local, no-push behavior; do
 not push directly to protected branches. Verify the branch exists and the working
 tree is clean before writing.
 
+When the user asks to push and open a PR/MR after approval, invoke `/rhdh-pr-mr`
+by name (or its `create-pr-mr.sh`) instead of hand-rolling `gh pr create` /
+`glab mr create`. Pass `--issue` when a Jira key is already known; omit it to
+skip linking. Midstream `updateBaseImages.sh` still uses distgit `createPR.sh`
+until that path is migrated.
+
 ## Repository invariants
 
 - Accepted branch selectors are `main` or `release-*`; map them to the documented
@@ -54,8 +60,12 @@ tree is clean before writing.
 - On RHDH, update Node headers when the builder image changes Node. Then, when
   those checkouts are in scope, pin plugin-catalog
   `build/containerfiles/builder.Containerfile` FROM to the same UBI Node
-  `tag@sha256`, copy `.nvm/`, rewrite `konflux.additional-tags` `node-v*` to
-  match `.nvmrc`, and set overlays `versions.json` `node` to that version.
+  `tag@sha256`. Catalog headers follow the Node version that Containerfile
+  will run: image `node --version`, or the newer `nodejs` RPM from
+  `dnf repoquery` when the file `dnf`-installs `nodejs` before the headers
+  `RUN`. Do not copy an older rhdh `.nvm/` over that version. Rewrite
+  `konflux.additional-tags` `node-v*` to match the catalog `.nvmrc`, and set
+  overlays `versions.json` `node` to the rhdh `.nvmrc` value.
   Catalog maps `release-1.Y` → GitLab `rhdh-1.Y-rhel-9` and
   `release-2.Y` → GitLab `release-2.Y` (using UBI10 / RHEL10). Catalog has no
   `rpms.lock.yaml`. Do not `[skip-build]` the catalog builder commit.

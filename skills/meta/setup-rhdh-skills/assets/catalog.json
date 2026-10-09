@@ -191,6 +191,13 @@
       "requiresExternalSkills": []
     },
     {
+      "name": "rhdh-playwright",
+      "category": "plugins",
+      "invocation": "model",
+      "requiresSkills": [],
+      "requiresExternalSkills": []
+    },
+    {
       "name": "rhdh-pr-create",
       "category": "plugins",
       "invocation": "model",
@@ -231,11 +238,21 @@
       ]
     },
     {
+      "name": "rhdh-backport",
+      "category": "plugins",
+      "invocation": "model",
+      "requiresSkills": [
+        "mutation-gate"
+      ],
+      "requiresExternalSkills": []
+    },
+    {
       "name": "rhdh-base-images",
       "category": "ci",
       "invocation": "model",
       "requiresSkills": [
-        "mutation-gate"
+        "mutation-gate",
+        "rhdh-pr-mr"
       ],
       "requiresExternalSkills": []
     },
@@ -244,7 +261,8 @@
       "category": "ci",
       "invocation": "model",
       "requiresSkills": [
-        "mutation-gate"
+        "mutation-gate",
+        "rhdh-pr-mr"
       ],
       "requiresExternalSkills": []
     },
@@ -284,10 +302,22 @@
       "requiresExternalSkills": []
     },
     {
+      "name": "rhdh-pr-mr",
+      "category": "ci",
+      "invocation": "model",
+      "requiresSkills": [
+        "mutation-gate",
+        "rhdh-jira-link"
+      ],
+      "requiresExternalSkills": []
+    },
+    {
       "name": "rhdh-yarn-bump",
       "category": "ci",
       "invocation": "model",
-      "requiresSkills": [],
+      "requiresSkills": [
+        "rhdh-pr-mr"
+      ],
       "requiresExternalSkills": []
     },
     {
@@ -310,6 +340,17 @@
       "invocation": "model",
       "requiresSkills": [
         "prose-editing"
+      ],
+      "requiresExternalSkills": []
+    },
+    {
+      "name": "rhdh-release-capacity-plan",
+      "category": "release",
+      "invocation": "model",
+      "requiresSkills": [
+        "rhdh-jira-api",
+        "rhdh-release-teams",
+        "rhdh-release-schedule"
       ],
       "requiresExternalSkills": []
     },

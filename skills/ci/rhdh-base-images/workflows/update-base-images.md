@@ -9,7 +9,7 @@ Refresh **base images** and **RPM lockfiles** in the GitHub hub/operator/must-ga
 | Repo | Node / Go source | RPM containerfile |
 |------|------------------|-------------------|
 | rhdh | `build/containerfiles/Containerfile` or `docker/Dockerfile` (release-1.9) | `build/containerfiles/Containerfile` or `.rhdh/docker/Dockerfile` |
-| rhdh-operator | `go.mod` aligned with `ubi10/go-toolset` on **main** only | `.rhdh/docker/Dockerfile` |
+| rhdh-operator | `go.mod` aligned with `ubi10/go-toolset` on **main** only | root `Dockerfile` (main, release-2.*, later); `.rhdh/docker/Dockerfile` on release-1.* |
 | rhdh-must-gather | — | `Containerfile` |
 | rhdh-plugin-catalog | `builder.Containerfile` FROM + `.nvm/` + `konflux.additional-tags` `node-v*` | none |
 | rhdh-plugin-export-overlays | `versions.json` `node` | none |
@@ -170,8 +170,11 @@ the script:
 3. Updates `.nvmrc` (version without `v` prefix) and `.nvm/releases/README.adoc` (date + version)
 4. Removes stale `node-v*-headers.tar.gz` files and pushes to the same automation PR
 5. When a plugin-catalog checkout is in the same run, pins
-   `builder.Containerfile` FROM to the rhdh UBI Node image, copies `.nvm/`, and
-   rewrites `konflux.additional-tags` `node-v*` (no `[skip-build]`)
+   `builder.Containerfile` FROM to the rhdh UBI Node image and rewrites
+   `konflux.additional-tags` `node-v*` (no `[skip-build]`). Headers are the
+   image `node --version`, or the newer `nodejs` RPM from `dnf repoquery`
+   inside that image when the Containerfile `dnf`-installs `nodejs` before the
+   headers `RUN`. Copy rhdh `.nvm/` only when it is at least that version.
 6. When an overlays checkout is in the same run, sets `versions.json` `node` to
    that `.nvmrc` value
 
@@ -197,6 +200,8 @@ Do not downgrade. If `go.mod` already pins a newer toolchain (for example `go1.2
 - Treating `rpm-lockfile-prototype` `No sources found for` / "no matching sources" warnings as a failure or remaining risk. The source RPM is often unpublished; the lockfile is still valid.
 - Lowering `go.mod` `toolchain` (or `go`) to match an older UBI Go toolset image. Keep the newer pin.
 - Copying plugin-catalog `.nvm/` headers while leaving `builder.Containerfile` FROM on an older UBI Node tag, or leaving a stale `node-v*` in `konflux.additional-tags`.
+- Setting catalog headers from the UBI image `node --version` when `builder.Containerfile` `dnf`-installs a newer `nodejs` RPM before the headers `RUN`. That is the 1.10 failure mode: image v24.19.0, module RPM 24.21.0, missing `node-v24.21.0-headers.tar.gz`.
+- Copying an older rhdh `.nvm/` onto a catalog builder whose `dnf` nodejs RPM is newer.
 - Handing catalog FROM / overlays `versions.json` to `/rhdh-konflux-tasks`. That skill invokes this one; it does not pin those files.
 - Claiming Node headers / `.nvmrc` are done while plugin-catalog still advertises an old `node-v*` in `konflux.additional-tags`. Name the catalog (and overlays) checkout outcome or that it was out of scope.
 
