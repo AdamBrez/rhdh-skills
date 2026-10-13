@@ -158,14 +158,7 @@ catalog_git_branch_for() {
 
 detect_repo_kind() {
     local repo_dir="$1"
-    # Must-gather ships a root Containerfile plus rpms.in.yaml / rpms.lock.yaml.
-    # collection-scripts/ was the 1.10 marker; main and release-2.1 dropped that
-    # directory in the Go rewrite but still commit the lockfiles (rhdh-must-gather#347).
-    # Hub and operator also have the yaml pair, without a root Containerfile.
-    if [[ -f "${repo_dir}/Containerfile" && -f "${repo_dir}/rpms.in.yaml" ]] \
-        && { [[ -f "${repo_dir}/rpms.lock.yaml" ]] || [[ -d "${repo_dir}/collection-scripts" ]]; }; then
-        echo "rhdh-must-gather"
-    elif [[ -f "${repo_dir}/go.mod" ]] \
+    if [[ -f "${repo_dir}/go.mod" ]] \
         && grep -q '^module github.com/redhat-developer/rhdh-operator' "${repo_dir}/go.mod" 2>/dev/null; then
         echo "rhdh-operator"
     elif [[ -f "${repo_dir}/build/containerfiles/builder.Containerfile" && -f "${repo_dir}/.nvmrc" ]] \
@@ -178,6 +171,10 @@ detect_repo_kind() {
         echo "rhdh-plugin-export-overlays"
     elif [[ -f "${repo_dir}/rpms.in.yaml" ]] && [[ -f "${repo_dir}/package.json" ]]; then
         echo "rhdh"
+    elif [[ -f "${repo_dir}/rpms.in.yaml" && -f "${repo_dir}/rpms.lock.yaml" ]]; then
+        # Must-gather on main and release-* (release-1.9, release-1.10, release-2.1, …).
+        # Hub and operator also ship this pair and are identified above.
+        echo "rhdh-must-gather"
     else
         echo "unknown"
     fi
