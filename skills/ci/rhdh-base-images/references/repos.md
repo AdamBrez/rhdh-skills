@@ -12,7 +12,7 @@
 ## redhat-developer/rhdh-must-gather
 
 - Clone: `https://github.com/redhat-developer/rhdh-must-gather.git`
-- Branches: `main`, `release-1.9`, `release-1.10`, `release-2.1`, … when that branch exists
+- Branches: `main`, `release-1.10`, `release-2.1`
 - Base images: root `Containerfile`, `.rhdh/docker/Containerfile`
 - RPM lock: root `Containerfile` + `rpms.in.yaml` → `rpms.lock.yaml`. RHEL 9 streams that install `openshift-clients` pin `rhocp-N-for-rhel-9-$basearch-rpms` to `https://mirror.openshift.com/pub/openshift-v4/$basearch/dependencies/rpms/N-el9-beta/`; bump N to the latest published stream before regenerating the lockfile. UBI 10 / RHDH 2.y images do not use that repo.
 - Markers: `cmd/gather/` directory on a `release-2.*` or `main` branch; `collection-scripts/` directory on a `release-1.10` branch
