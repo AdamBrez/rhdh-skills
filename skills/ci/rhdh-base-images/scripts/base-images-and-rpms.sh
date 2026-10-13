@@ -171,13 +171,40 @@ detect_repo_kind() {
         echo "rhdh-plugin-export-overlays"
     elif [[ -f "${repo_dir}/rpms.in.yaml" ]] && [[ -f "${repo_dir}/package.json" ]]; then
         echo "rhdh"
-    elif [[ -f "${repo_dir}/rpms.in.yaml" && -f "${repo_dir}/rpms.lock.yaml" ]]; then
-        # Must-gather on main and release-* (release-1.9, release-1.10, release-2.1, …).
-        # Hub and operator also ship this pair and are identified above.
+    elif must_gather_marker_present "${repo_dir}" "${BRANCH:-}"; then
         echo "rhdh-must-gather"
     else
         echo "unknown"
     fi
+}
+
+# cmd/gather/ on main and release-2.*; collection-scripts/ on release-1.10.
+# When the checkout is a git repo, read the target branch tree so detection
+# does not depend on whichever branch is currently checked out.
+must_gather_marker_present() {
+    local repo_dir="$1"
+    local branch="$2"
+    local marker=""
+
+    if [[ "${branch}" == "main" || "${branch}" == release-2.* ]]; then
+        marker="cmd/gather"
+    elif [[ "${branch}" == "release-1.10" ]]; then
+        marker="collection-scripts"
+    else
+        return 1
+    fi
+
+    if [[ -e "${repo_dir}/.git" ]] \
+        && git -C "${repo_dir}" rev-parse --verify --quiet "refs/remotes/origin/${branch}" >/dev/null; then
+        git -C "${repo_dir}" cat-file -e "origin/${branch}:${marker}" 2>/dev/null
+        return
+    fi
+    if [[ -e "${repo_dir}/.git" ]] \
+        && git -C "${repo_dir}" rev-parse --verify --quiet "refs/heads/${branch}" >/dev/null; then
+        git -C "${repo_dir}" cat-file -e "${branch}:${marker}" 2>/dev/null
+        return
+    fi
+    [[ -d "${repo_dir}/${marker}" ]]
 }
 
 rhdh_nodejs_containerfile() {
