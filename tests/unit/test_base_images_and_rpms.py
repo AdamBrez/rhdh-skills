@@ -418,6 +418,102 @@ class TestBaseImagesAndRpmsScript:
             assert result.returncode == 0, result.stderr
             assert result.stdout.strip() == catalog_branch
 
+    @pytest.mark.parametrize(
+        ("branch", "marker", "expected"),
+        [
+            ("main", "cmd/gather", "rhdh-must-gather"),
+            ("release-2.1", "cmd/gather", "rhdh-must-gather"),
+            ("release-1.10", "collection-scripts", "rhdh-must-gather"),
+            ("release-1.10", "cmd/gather", "unknown"),
+            ("main", "collection-scripts", "unknown"),
+        ],
+    )
+    def test_detect_repo_kind_must_gather_markers(
+        self, tmp_path: Path, branch: str, marker: str, expected: str
+    ) -> None:
+        detect = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
+        present = _extract_bash_function(MAIN_SCRIPT, "must_gather_marker_present")
+        repo = tmp_path / "must-gather"
+        (repo / marker).mkdir(parents=True)
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{present}\n{detect}\nBRANCH={branch} detect_repo_kind "$1"',
+                "bash",
+                str(repo),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == expected
+
+    def test_detect_repo_kind_must_gather_uses_target_branch_tree(self, tmp_path: Path) -> None:
+        detect = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
+        present = _extract_bash_function(MAIN_SCRIPT, "must_gather_marker_present")
+        repo = tmp_path / "must-gather"
+        repo.mkdir()
+        git = ["git", "-C", str(repo), "-c", "user.email=test@example.com", "-c", "user.name=test"]
+        subprocess.run([*git, "init", "-b", "main"], check=True, capture_output=True)
+        (repo / "cmd" / "gather").mkdir(parents=True)
+        (repo / "cmd" / "gather" / "keep").write_text("ok\n")
+        subprocess.run([*git, "add", "cmd"], check=True, capture_output=True)
+        subprocess.run([*git, "commit", "-m", "gather"], check=True, capture_output=True)
+        subprocess.run([*git, "checkout", "-b", "other"], check=True, capture_output=True)
+        subprocess.run([*git, "rm", "-r", "cmd"], check=True, capture_output=True)
+        subprocess.run([*git, "commit", "-m", "drop gather"], check=True, capture_output=True)
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{present}\n{detect}\nBRANCH=main detect_repo_kind "$1"',
+                "bash",
+                str(repo),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "rhdh-must-gather"
+
+    def test_detect_repo_kind_hub_lockfiles_are_not_must_gather(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
+        repo = tmp_path / "rhdh"
+        repo.mkdir()
+        (repo / "package.json").write_text("{}\n")
+        (repo / "rpms.in.yaml").write_text("packages: []\n")
+        (repo / "rpms.lock.yaml").write_text("lockfileVersion: 1\n")
+        result = subprocess.run(
+            ["bash", "-c", f'{function}\ndetect_repo_kind "$1"', "bash", str(repo)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "rhdh"
+
+    def test_detect_repo_kind_operator_lockfiles_are_not_must_gather(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
+        repo = tmp_path / "operator"
+        repo.mkdir()
+        (repo / "Dockerfile").write_text("FROM registry.access.redhat.com/ubi9/ubi:latest\n")
+        (repo / "go.mod").write_text(
+            "module github.com/redhat-developer/rhdh-operator\n\ngo 1.24.0\n"
+        )
+        (repo / "rpms.in.yaml").write_text("packages: []\n")
+        (repo / "rpms.lock.yaml").write_text("lockfileVersion: 1\n")
+        result = subprocess.run(
+            ["bash", "-c", f'{function}\ndetect_repo_kind "$1"', "bash", str(repo)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "rhdh-operator"
+
     def test_detect_repo_kind_plugin_catalog(self, tmp_path: Path) -> None:
         function = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
         repo = tmp_path / "catalog"
