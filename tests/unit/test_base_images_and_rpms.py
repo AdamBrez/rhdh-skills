@@ -418,6 +418,72 @@ class TestBaseImagesAndRpmsScript:
             assert result.returncode == 0, result.stderr
             assert result.stdout.strip() == catalog_branch
 
+    def test_detect_repo_kind_must_gather_from_rpm_lockfiles(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
+        repo = tmp_path / "must-gather"
+        repo.mkdir()
+        (repo / "Containerfile").write_text("FROM registry.access.redhat.com/ubi9/ubi:latest\n")
+        (repo / "rpms.in.yaml").write_text("packages: []\n")
+        (repo / "rpms.lock.yaml").write_text("lockfileVersion: 1\n")
+        result = subprocess.run(
+            ["bash", "-c", f'{function}\ndetect_repo_kind "$1"', "bash", str(repo)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "rhdh-must-gather"
+
+    def test_detect_repo_kind_must_gather_legacy_collection_scripts(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
+        repo = tmp_path / "must-gather-110"
+        (repo / "collection-scripts").mkdir(parents=True)
+        (repo / "Containerfile").write_text("FROM registry.access.redhat.com/ubi9/ubi:latest\n")
+        (repo / "rpms.in.yaml").write_text("packages: []\n")
+        result = subprocess.run(
+            ["bash", "-c", f'{function}\ndetect_repo_kind "$1"', "bash", str(repo)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "rhdh-must-gather"
+
+    def test_detect_repo_kind_hub_lockfiles_are_not_must_gather(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
+        repo = tmp_path / "rhdh"
+        repo.mkdir()
+        (repo / "package.json").write_text("{}\n")
+        (repo / "rpms.in.yaml").write_text("packages: []\n")
+        (repo / "rpms.lock.yaml").write_text("lockfileVersion: 1\n")
+        result = subprocess.run(
+            ["bash", "-c", f'{function}\ndetect_repo_kind "$1"', "bash", str(repo)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "rhdh"
+
+    def test_detect_repo_kind_operator_lockfiles_are_not_must_gather(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
+        repo = tmp_path / "operator"
+        repo.mkdir()
+        (repo / "Dockerfile").write_text("FROM registry.access.redhat.com/ubi9/ubi:latest\n")
+        (repo / "go.mod").write_text(
+            "module github.com/redhat-developer/rhdh-operator\n\ngo 1.24.0\n"
+        )
+        (repo / "rpms.in.yaml").write_text("packages: []\n")
+        (repo / "rpms.lock.yaml").write_text("lockfileVersion: 1\n")
+        result = subprocess.run(
+            ["bash", "-c", f'{function}\ndetect_repo_kind "$1"', "bash", str(repo)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "rhdh-operator"
+
     def test_detect_repo_kind_plugin_catalog(self, tmp_path: Path) -> None:
         function = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
         repo = tmp_path / "catalog"
