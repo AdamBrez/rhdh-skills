@@ -60,8 +60,18 @@ until that path is migrated.
 - Keep base-image UBI minors aligned with RPM repository URLs.
 - Before regenerating `rpms.lock.yaml`, bump OpenShift clients `N-el9-beta`
   `baseurl` values and matching `rhocp-N-for-rhel-9-$basearch-rpms` repoids in
-  `rpms.in.yaml` to the latest stream on mirror.openshift.com (for example
-  `4.21-el9-beta` → `4.22-el9-beta`). Skip when the file has no such repo.
+  `rpms.in.yaml` to the latest **released** 4.y stream that still exists on
+  mirror.openshift.com (for example `4.21-el9-beta` → `4.22-el9-beta`). Released
+  4.y names come from the product life cycle API linked from
+  https://access.redhat.com/support/policy/updates/openshift#dates. Do not move
+  to an unreleased directory such as `4.23-el9-beta` or `5.1-el9-beta`. If the
+  life cycle fetch fails, or no released 4.y directory is on the mirror, leave
+  `rpms.in.yaml` unchanged. Skip when the file has no such repo.
+- When a plugin-catalog checkout is in the run, rewrite
+  `build/containerfiles/builder.Containerfile` `/rhocp/4.N/` path segments to
+  that same latest released 4.y (for example `/rhocp/4.21/` → `/rhocp/4.22/`).
+  Leave `ocp-tools` URLs unchanged. Do not rewrite when the life cycle fetch
+  fails.
 - On RHDH, update Node headers when the builder image changes Node. Then, when
   those checkouts are in scope, pin plugin-catalog
   `build/containerfiles/builder.Containerfile` FROM to the same UBI Node

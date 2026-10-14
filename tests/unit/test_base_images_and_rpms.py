@@ -378,11 +378,109 @@ class TestBaseImagesAndRpmsScript:
         assert result.returncode == 0, result.stderr
         assert rpms_in.read_text(encoding="utf-8") == original
 
+    def test_released_openshift_4y_versions_from_json_keeps_plain_4y(self) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "released_openshift_4y_versions_from_json")
+        payload = (
+            '{"data":[{"versions":['
+            '{"name":"4.22"},{"name":"4.21"},{"name":"4.6 EUS"},{"name":"3"}'
+            "]}]}"
+        )
+        result = subprocess.run(
+            ["bash", "-c", f"{function}\nreleased_openshift_4y_versions_from_json"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.split() == ["4.21", "4.22"]
+
+    def test_released_el9_beta_stream_ignores_unreleased_directories(self) -> None:
+        function = _extract_bash_function(
+            MAIN_SCRIPT, "latest_released_openshift_el9_beta_stream_from_listing"
+        )
+        listing = (
+            '<a href="4.22-el9-beta/">4.22-el9-beta/</a>\n'
+            '<a href="4.23-el9-beta/">4.23-el9-beta/</a>\n'
+            '<a href="5.1-el9-beta/">5.1-el9-beta/</a>\n'
+        )
+        released = "4.20\n4.21\n4.22\n"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function}\nlatest_released_openshift_el9_beta_stream_from_listing "$1"',
+                "bash",
+                released,
+            ],
+            input=listing,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "4.22-el9-beta"
+
+    def test_released_el9_beta_stream_empty_when_only_unreleased(self) -> None:
+        function = _extract_bash_function(
+            MAIN_SCRIPT, "latest_released_openshift_el9_beta_stream_from_listing"
+        )
+        listing = '<a href="5.1-el9-beta/">5.1-el9-beta/</a>\n'
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function}\nlatest_released_openshift_el9_beta_stream_from_listing "$1"',
+                "bash",
+                "4.22\n",
+            ],
+            input=listing,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == ""
+
+    def test_bump_rhocp_version_in_file_rewrites_rhocp_only(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "bump_rhocp_version_in_file")
+        containerfile = tmp_path / "builder.Containerfile"
+        containerfile.write_text(
+            "dnf config-manager --add-repo "
+            "https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel10/"
+            "x86_64/ocp-tools/4.22/os/ -q\n"
+            "dnf config-manager --add-repo "
+            "https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel10/"
+            "x86_64/rhocp/4.21/os/ -q\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function}\nbump_rhocp_version_in_file "$1" "$2"',
+                "bash",
+                str(containerfile),
+                "4.22",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        text = containerfile.read_text(encoding="utf-8")
+        assert "/rhocp/4.22/os/" in text
+        assert "/rhocp/4.21/" not in text
+        assert "/ocp-tools/4.22/os/" in text
+
     def test_skill_covers_openshift_el9_beta_rpm_bump(self) -> None:
         skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
         assert "N-el9-beta" in skill
+        assert "latest released" in skill
+        assert "/rhocp/4.N/" in skill
         script = MAIN_SCRIPT.read_text(encoding="utf-8")
         assert "bump_openshift_rpm_repos" in script
+        assert "bump_catalog_builder_rhocp" in script
         assert (
             'commit_push_paths "${branch}" "chore: update rpms.lock.yaml [skip-build]" rpms.lock.yaml rpms.in.yaml'
             in script
