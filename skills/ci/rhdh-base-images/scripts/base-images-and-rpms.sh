@@ -410,17 +410,69 @@ filter_rpm_lockfile_source_warnings() {
     grep -viE -- 'no sources found for |no matching sources' || true
 }
 
+# Product life cycle behind
+# https://access.redhat.com/support/policy/updates/openshift#dates
+# The #dates section points here; unreleased streams (4.23, 5.1) are absent.
+OPENSHIFT_LIFECYCLE_PRODUCTS_URL="https://access.redhat.com/product-life-cycles/api/v1/products?name=Red%20Hat%20OpenShift%20Container%20Platform"
+
+# stdin: lifecycle products JSON. stdout: released 4.N versions, one per line.
+# Names like "4.6 EUS" and "3" are ignored. No braces: unit tests extract this
+# function by counting '{' and '}'.
+released_openshift_4y_versions_from_json() {
+    python3 -c 'import json, re, sys
+payload = json.load(sys.stdin)
+versions = payload["data"][0]["versions"]
+minors = []
+for item in versions:
+    match = re.fullmatch(r"4\.(\d+)", item.get("name", ""))
+    if match:
+        minors.append(int(match.group(1)))
+for minor in sorted(set(minors)):
+    print("4.%d" % minor)
+'
+}
+
+released_openshift_4y_versions() {
+    local payload
+    payload=$(curl -fsSL "${OPENSHIFT_LIFECYCLE_PRODUCTS_URL}") || return 1
+    printf '%s\n' "${payload}" | released_openshift_4y_versions_from_json
+}
+
+latest_released_openshift_4y() {
+    released_openshift_4y_versions | sort -t. -k1,1n -k2,2n | tail -1
+}
+
 # OpenShift clients RPMs are published under rotating N-el9-beta directories
 # (4.21-el9-beta 404s once 4.22-el9-beta is the current stream). Parse a directory
-# listing; pick the highest N.M-el9-beta token.
+# listing; pick the highest N.M-el9-beta token. This does not apply the release
+# cap — callers that rewrite repos use latest_released_openshift_el9_beta_stream_from_listing.
 latest_openshift_el9_beta_stream_from_listing() {
     grep -oE '[0-9]+\.[0-9]+-el9-beta' | sort -u | sort -t. -k1,1n -k2,2n | tail -1
 }
 
+# stdin: mirror directory listing.
+# $1: newline-separated released versions (4.22, 4.21, ...).
+# stdout: highest N.M-el9-beta whose N.M is released, or nothing.
+latest_released_openshift_el9_beta_stream_from_listing() {
+    local released_versions="$1"
+    local stream ver selected=""
+    while IFS= read -r stream; do
+        [[ -n "${stream}" ]] || continue
+        ver="${stream%-el9-beta}"
+        if printf '%s\n' "${released_versions}" | grep -qxF -- "${ver}"; then
+            selected="${stream}"
+        fi
+    done < <(grep -oE '[0-9]+\.[0-9]+-el9-beta' | sort -u | sort -t. -k1,1n -k2,2n || true)
+    if [[ -n "${selected}" ]]; then
+        printf '%s\n' "${selected}"
+    fi
+}
+
 latest_openshift_el9_beta_stream() {
-    local listing
+    local listing released
     listing=$(curl -fsSL 'https://mirror.openshift.com/pub/openshift-v4/amd64/dependencies/rpms/') || return 1
-    printf '%s\n' "${listing}" | latest_openshift_el9_beta_stream_from_listing
+    released=$(released_openshift_4y_versions) || return 1
+    printf '%s\n' "${listing}" | latest_released_openshift_el9_beta_stream_from_listing "${released}"
 }
 
 # Rewrite rpms.in.yaml OpenShift clients baseurl and rhocp-N-for-rhel-9 repoids.
@@ -452,12 +504,40 @@ bump_openshift_rpm_repos() {
         return 0
     fi
     new_stream=$(latest_openshift_el9_beta_stream) || {
-        warn "RPM repos: could not list OpenShift el9-beta streams; leaving rpms.in.yaml"
+        warn "RPM repos: could not resolve a released OpenShift 4.y el9-beta stream; leaving rpms.in.yaml"
         return 0
     }
-    [[ -n "${new_stream}" ]] || return 0
-    log "RPM repos: latest OpenShift el9-beta stream is ${new_stream}"
+    if [[ -z "${new_stream}" ]]; then
+        warn "RPM repos: no released 4.y el9-beta directory on the mirror; leaving rpms.in.yaml"
+        return 0
+    fi
+    log "RPM repos: latest released OpenShift el9-beta stream is ${new_stream}"
     bump_openshift_rpm_repos_in_file "${file}" "${new_stream}"
+}
+
+# Rewrite /rhocp/4.N/ in a Containerfile to a released 4.y. Leaves ocp-tools alone.
+bump_rhocp_version_in_file() {
+    local file="$1"
+    local new_ver="$2"
+    [[ -f "${file}" ]] || return 0
+    [[ "${new_ver}" =~ ^4\.[0-9]+$ ]] || return 0
+    grep -qE '/rhocp/4\.[0-9]+/' "${file}" || return 0
+    sed -i -E "s|/rhocp/4\\.[0-9]+/|/rhocp/${new_ver}/|g" "${file}"
+}
+
+bump_catalog_builder_rhocp() {
+    local catalog_cf="$1"
+    local new_ver
+    new_ver=$(latest_released_openshift_4y) || {
+        warn "plugin-catalog: could not read released OpenShift 4.y versions; leaving rhocp URL"
+        return 0
+    }
+    if [[ -z "${new_ver}" ]]; then
+        warn "plugin-catalog: lifecycle API listed no OpenShift 4.y versions; leaving rhocp URL"
+        return 0
+    fi
+    log "plugin-catalog: pin rhocp repo to released ${new_ver}"
+    bump_rhocp_version_in_file "${catalog_cf}" "${new_ver}"
 }
 
 update_rpm_lockfile() {
@@ -875,18 +955,23 @@ update_plugin_catalog_node() {
     fi
 
     if [[ ${DRY_RUN} -eq 1 ]]; then
+        echo "  dry-run: pin ${catalog_cf} /rhocp/4.N/ to the latest released OpenShift 4.y"
         echo "  dry-run: pin ${catalog_cf} FROM to rhdh UBI node image"
         echo "  dry-run: headers from image node --version, or newer dnf repoquery nodejs when the builder dnf-installs nodejs"
         echo "  dry-run: skip copying an older rhdh .nvm/; rewrite konflux.additional-tags node-v*"
         return 0
     fi
 
+    pushd "${repo_dir}" >/dev/null
+    bump_catalog_builder_rhocp "${catalog_cf}"
+    commit_push_paths "${git_branch}" "chore: pin catalog builder rhocp to released OpenShift" \
+        "${catalog_cf}"
+
     if ! command -v podman >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
         warn "plugin-catalog: podman or docker required to resolve node headers; skipping"
+        popd >/dev/null
         return 0
     fi
-
-    pushd "${repo_dir}" >/dev/null
     if [[ -n "${src_image}" ]]; then
         pin_catalog_builder_from "${catalog_cf}" "${src_image}"
     fi

@@ -148,8 +148,10 @@ updateBaseImages.sh -w REPO_ROOT -b BRANCH -sb SCRIPTS_BRANCH -maxdepth 5 --pr
 Matches each repo's GitHub Action, then commits and pushes to the automation PR:
 
 ```bash
-# Bump rotating OpenShift clients N-el9-beta URLs in rpms.in.yaml first
-# (4.21-el9-beta 404s once 4.22-el9-beta is published).
+# Bump rotating OpenShift clients N-el9-beta URLs in rpms.in.yaml first,
+# capped at the latest released 4.y (4.21-el9-beta 404s once 4.22-el9-beta
+# is the newest released stream still on the mirror). Do not follow
+# unreleased directories such as 4.23-el9-beta or 5.1-el9-beta.
 rpm-lockfile-prototype -f CONTAINERFILE rpms.in.yaml
 git add rpms.in.yaml rpms.lock.yaml
 git commit -s -m "chore: update rpms.lock.yaml [skip-build]"
@@ -172,7 +174,8 @@ the script:
 3. Updates `.nvmrc` (version without `v` prefix) and `.nvm/releases/README.adoc` (date + version)
 4. Removes stale `node-v*-headers.tar.gz` files and pushes to the same automation PR
 5. When a plugin-catalog checkout is in the same run, pins
-   `builder.Containerfile` FROM to the rhdh UBI Node image and rewrites
+   `builder.Containerfile` `/rhocp/4.N/` to the latest released OpenShift 4.y,
+   pins FROM to the rhdh UBI Node image, and rewrites
    `konflux.additional-tags` `node-v*` (no `[skip-build]`). Headers are the
    image `node --version`, or the newer `nodejs` RPM from `dnf repoquery`
    inside that image when the Containerfile `dnf`-installs `nodejs` before the
@@ -200,6 +203,7 @@ Do not downgrade. If `go.mod` already pins a newer toolchain (for example `go1.2
 - Omitting `registry.redhat.io` login before base image updates.
 - Committing `rpms.lock.yaml` without checking the base image minor (e.g. UBI `9.8`) still matches `rpms.in.yaml` repo URLs.
 - Regenerating `rpms.lock.yaml` while `rpms.in.yaml` still points at a vanished OpenShift `N-el9-beta` directory (hermeto FetchError on `openshift-clients`).
+- Bumping `rpms.in.yaml` or catalog `builder.Containerfile` `/rhocp/4.N/` to an unreleased OpenShift stream (`4.23`, `5.1`). Those RPMs are signed with a key UBI 9 microdnf cannot verify. Stay on the latest released 4.y.
 - Treating `rpm-lockfile-prototype` `No sources found for` / "no matching sources" warnings as a failure or remaining risk. The source RPM is often unpublished; the lockfile is still valid.
 - Lowering `go.mod` `toolchain` (or `go`) to match an older UBI Go toolset image. Keep the newer pin.
 - Copying plugin-catalog `.nvm/` headers while leaving `builder.Containerfile` FROM on an older UBI Node tag, or leaving a stale `node-v*` in `konflux.additional-tags`.
