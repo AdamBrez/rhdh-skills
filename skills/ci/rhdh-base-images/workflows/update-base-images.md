@@ -152,7 +152,10 @@ Matches each repo's GitHub Action, then commits and pushes to the automation PR:
 # capped at the latest released 4.y (4.21-el9-beta 404s once 4.22-el9-beta
 # is the newest released stream still on the mirror). Do not follow
 # unreleased directories such as 4.23-el9-beta or 5.1-el9-beta.
+# Layered install onto the base image:
 rpm-lockfile-prototype -f CONTAINERFILE rpms.in.yaml
+# Empty --installroot (operator rpm-builder): do not pass -f
+rpm-lockfile-prototype --bare rpms.in.yaml
 git add rpms.in.yaml rpms.lock.yaml
 git commit -s -m "chore: update rpms.lock.yaml [skip-build]"
 git push origin <chore/automated-update-base-images-*>   # same PR as base images
@@ -203,6 +206,7 @@ Do not downgrade. If `go.mod` already pins a newer toolchain (for example `go1.2
 - Omitting `registry.redhat.io` login before base image updates.
 - Committing `rpms.lock.yaml` without checking the base image minor (e.g. UBI `9.8`) still matches `rpms.in.yaml` repo URLs.
 - Regenerating `rpms.lock.yaml` while `rpms.in.yaml` still points at a vanished OpenShift `N-el9-beta` directory (hermeto FetchError on `openshift-clients`).
+- Solving an `--installroot` Containerfile with `-f` (image rpmdb). openssl then lands without glibc/coreutils; hermetic `dnf install --installroot` fails with `nothing provides`. Use `--bare`.
 - Bumping `rpms.in.yaml` or catalog `builder.Containerfile` `/rhocp/4.N/` to an unreleased OpenShift stream (`4.23`, `5.1`). Those RPMs are signed with a key UBI 9 microdnf cannot verify. Stay on the latest released 4.y.
 - Treating `rpm-lockfile-prototype` `No sources found for` / "no matching sources" warnings as a failure or remaining risk. The source RPM is often unpublished; the lockfile is still valid.
 - Lowering `go.mod` `toolchain` (or `go`) to match an older UBI Go toolset image. Keep the newer pin.

@@ -72,6 +72,13 @@ until that path is migrated.
   that same latest released 4.y (for example `/rhocp/4.21/` → `/rhocp/4.22/`).
   Leave `ocp-tools` URLs unchanged. Do not rewrite when the life cycle fetch
   fails.
+- When the RPM Containerfile uses `dnf`/`microdnf install --installroot`
+  (operator empty rootfs), regenerate the lockfile with
+  `rpm-lockfile-prototype --bare` so the full closure (glibc, coreutils, bash)
+  is locked. Do not pass `-f`; that loads the UBI rpmdb and omits those
+  packages. Layered installs onto the base image still use `-f`. If the solve
+  fails (`nothing provides`, `conflicting requests`), restore
+  `rpms.lock.yaml` / `rpms.in.yaml` and do not push.
 - On RHDH, update Node headers when the builder image changes Node. Then, when
   those checkouts are in scope, pin plugin-catalog
   `build/containerfiles/builder.Containerfile` FROM to the same UBI Node
