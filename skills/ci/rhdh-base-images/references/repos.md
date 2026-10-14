@@ -14,7 +14,7 @@
 - Clone: `https://github.com/redhat-developer/rhdh-must-gather.git`
 - Branches: `main`, `release-1.10`, `release-2.*`
 - Base images: root `Containerfile`, `.rhdh/docker/Containerfile`
-- RPM lock: root `Containerfile` + `rpms.in.yaml` → `rpms.lock.yaml`. RHEL 9 streams that install `openshift-clients` pin `rhocp-N-for-rhel-9-$basearch-rpms` to `https://mirror.openshift.com/pub/openshift-v4/$basearch/dependencies/rpms/N-el9-beta/`; bump N to the latest released 4.y stream that is still on the mirror before regenerating the lockfile. Do not follow unreleased directories (`4.23-el9-beta`, `5.1-el9-beta`). UBI 10 / RHDH 2.y images do not use that repo.
+- RPM lock: root `Containerfile` + `rpms.in.yaml` → `rpms.lock.yaml`. RHEL 9 streams that install `openshift-clients` pin `rhocp-N-for-rhel-9-$basearch-rpms` to `https://mirror.openshift.com/pub/openshift-v4/$basearch/dependencies/rpms/N-el9-beta/`; bump N to the latest released 4.y stream that is still on the mirror before regenerating the lockfile. Do not follow unreleased directories (`4.23-el9-beta`, `5.1-el9-beta`). UBI 10 / RHDH 2.y images do not use that repo. See https://access.redhat.com/product-life-cycles/api/v1/products?name=Red%20Hat%20OpenShift%20Container%20Platform
 - Markers: `cmd/gather/` directory on a `release-2.*` or `main` branch; `collection-scripts/` directory on a `release-1.10` branch
 
 ## redhat-developer/rhdh-operator
