@@ -975,13 +975,9 @@ done = False
 rewritten = []
 for line in lines:
     if (not done) and ("konflux.additional-tags=" in line):
-        line, tag_count = re.subn(
-            re.escape(tag) + r"(?![0-9])",
-            new_tag,
-            line,
-            count=1,
-        )
-        done = tag_count == 1
+        if tag in line:
+            line = line.replace(tag, new_tag, 1)
+            done = True
     rewritten.append(line)
 path.write_text("".join(rewritten), encoding="utf-8")
 PY

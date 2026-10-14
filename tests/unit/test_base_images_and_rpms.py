@@ -480,7 +480,7 @@ class TestBaseImagesAndRpmsScript:
             '      version="2.2" \\\n'
             '      release="3" \\\n'
             '      rhdh.version="2.2.0" \\\n'
-            '      konflux.additional-tags="next, 2.2, 2.2.0, 2.2-3, 2.2-30, '
+            '      konflux.additional-tags="next, 2.2, 2.2.0, 2.2-3, '
             'node-v${NODE_VERSION}" \\\n',
             encoding="utf-8",
         )
@@ -501,10 +501,7 @@ class TestBaseImagesAndRpmsScript:
         assert 'version="2.2"' in text
         assert 'release="4"' in text
         assert 'rhdh.version="2.2.0"' in text
-        assert "2.2-4" in text
-        assert "2.2-3," not in text
-        assert "2.2-30" in text
-        assert "node-v${NODE_VERSION}" in text
+        assert 'konflux.additional-tags="next, 2.2, 2.2.0, 2.2-4, node-v${NODE_VERSION}"' in text
 
     def test_sync_catalog_builder_pipeline_base_image_sets_and_inserts(
         self, tmp_path: Path
