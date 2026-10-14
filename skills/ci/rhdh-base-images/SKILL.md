@@ -7,7 +7,8 @@ description: >-
   and bump overlays `versions.json` `node` on `main` or a `release-1.10` branch.
   Use for weekly base-image maintenance, a UBI or RHEL bump, an RPM lockfile
   refresh, "which base images are out of date", node-v*-headers.tar.gz, catalog
-  builder FROM, overlays Node version, UBI minor skew inside a Containerfile,
+  builder FROM, builder PipelineRun BASE_IMAGES, catalog release suffix,
+  overlays Node version, UBI minor skew inside a Containerfile,
   or an OpenShift clients `N-el9-beta` / `4.21-el9-beta` RPM 404.
 compatibility: "bash, jq, skopeo, curl, git, python3; podman or docker for toolchain detection; gh or glab for PR/MR creation."
 ---
@@ -72,6 +73,14 @@ until that path is migrated.
   that same latest released 4.y (for example `/rhocp/4.21/` → `/rhocp/4.22/`).
   Leave `ocp-tools` URLs unchanged. Do not rewrite when the life cycle fetch
   fails.
+- When that Containerfile changes in the same run, increment its `release="N"`
+  label and the matching `X.Y-N` token in `konflux.additional-tags` once
+  (`release="3"` and `2.2-3` become `release="4"` and `2.2-4`). Leave
+  `version=`, `rhdh.version=`, and `node-v*` to the node-header rewrite.
+  Set `BASE_IMAGES` on every `.tekton/plugin-catalog-builder*.yaml`
+  `build-source-image` task to the Containerfile `FROM` image, inserting the
+  param when it is missing. Do not bump `release` when the Containerfile is
+  unchanged.
 - When the RPM Containerfile uses `dnf`/`microdnf install --installroot`
   (operator empty rootfs), regenerate the lockfile with
   `rpm-lockfile-prototype --bare` so the full closure (glibc, coreutils, bash)
@@ -120,4 +129,7 @@ target and outcome, and the push and PR state is stated explicitly — including
 `.nvmrc` changed, name the plugin-catalog FROM old→new, confirm
 `grep konflux.additional-tags build/containerfiles/builder.Containerfile`
 contains `node-v` matching `.nvmrc`, and name the overlays `versions.json`
-`node` value (or that those checkouts were not in scope).
+`node` value (or that those checkouts were not in scope). When the catalog
+builder Containerfile changed, name the `release` old→new and confirm builder
+PipelineRun `BASE_IMAGES` matches that file's `FROM` (or that the Containerfile
+did not change).

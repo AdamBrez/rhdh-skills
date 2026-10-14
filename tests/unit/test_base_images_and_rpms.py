@@ -473,6 +473,92 @@ class TestBaseImagesAndRpmsScript:
         assert "/rhocp/4.21/" not in text
         assert "/ocp-tools/4.22/os/" in text
 
+    def test_bump_catalog_builder_release_increments_suffix(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "bump_catalog_builder_release")
+        containerfile = tmp_path / "builder.Containerfile"
+        containerfile.write_text(
+            '      version="2.2" \\\n'
+            '      release="3" \\\n'
+            '      rhdh.version="2.2.0" \\\n'
+            '      konflux.additional-tags="next, 2.2, 2.2.0, 2.2-3, '
+            'node-v${NODE_VERSION}" \\\n',
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function}\nbump_catalog_builder_release "$1"',
+                "bash",
+                str(containerfile),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        text = containerfile.read_text(encoding="utf-8")
+        assert 'version="2.2"' in text
+        assert 'release="4"' in text
+        assert 'rhdh.version="2.2.0"' in text
+        assert 'konflux.additional-tags="next, 2.2, 2.2.0, 2.2-4, node-v${NODE_VERSION}"' in text
+
+    def test_sync_catalog_builder_pipeline_base_image_sets_and_inserts(
+        self, tmp_path: Path
+    ) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "sync_catalog_builder_pipeline_base_image")
+        tekton = tmp_path / ".tekton"
+        tekton.mkdir()
+        image = (
+            "registry.access.redhat.com/ubi10/nodejs-24:10.2-1"
+            "@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )
+        existing = tekton / "plugin-catalog-builder-2-push.yaml"
+        existing.write_text(
+            "    - name: build-source-image\n"
+            "      params:\n"
+            "      - name: BINARY_IMAGE\n"
+            '        value: "quay.io/example:old"\n'
+            "      - name: BASE_IMAGES\n"
+            '        value: "registry.access.redhat.com/ubi10/nodejs-24:old"\n'
+            "      runAfter:\n"
+            "      - build-image-index\n",
+            encoding="utf-8",
+        )
+        missing = tekton / "plugin-catalog-builder-2-1-push.yaml"
+        missing.write_text(
+            "    - name: build-source-image\n"
+            "      params:\n"
+            "      - name: BINARY_IMAGE\n"
+            '        value: "quay.io/example:old"\n'
+            "      runAfter:\n"
+            "      - build-image-index\n",
+            encoding="utf-8",
+        )
+        other = tekton / "plugin-catalog-index-2-push.yaml"
+        other.write_text("name: build-source-image\n", encoding="utf-8")
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function}\nsync_catalog_builder_pipeline_base_image "$1" "$2"',
+                "bash",
+                str(tmp_path),
+                image,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        updated = existing.read_text(encoding="utf-8")
+        inserted = missing.read_text(encoding="utf-8")
+        assert f'value: "{image}"' in updated
+        assert "nodejs-24:old" not in updated
+        assert f'name: BASE_IMAGES\n        value: "{image}"' in inserted
+        assert inserted.index("BASE_IMAGES") < inserted.index("runAfter")
+        assert other.read_text(encoding="utf-8") == "name: build-source-image\n"
+
     def test_rpm_lockfile_prototype_args_bare_for_installroot(self, tmp_path: Path) -> None:
         helpers = (
             _extract_bash_function(MAIN_SCRIPT, "containerfile_uses_installroot")
@@ -542,7 +628,10 @@ class TestBaseImagesAndRpmsScript:
         unresolved = script.split(
             'warn "plugin-catalog: could not resolve a Node headers version', 1
         )[1][:500]
-        assert 'commit_push_paths "${git_branch}" "chore: pin catalog builder"' in unresolved
+        assert (
+            'commit_catalog_builder_paths "${git_branch}" "chore: pin catalog builder"'
+            in unresolved
+        )
         assert (
             'commit_push_paths "${branch}" "chore: update rpms.lock.yaml [skip-build]" rpms.lock.yaml rpms.in.yaml'
             in script
