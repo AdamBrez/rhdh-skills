@@ -179,7 +179,10 @@ the script:
 5. When a plugin-catalog checkout is in the same run, pins
    `builder.Containerfile` `/rhocp/4.N/` to the latest released OpenShift 4.y,
    pins FROM to the rhdh UBI Node image, and rewrites
-   `konflux.additional-tags` `node-v*` (no `[skip-build]`). Headers are the
+   `konflux.additional-tags` `node-v*` (no `[skip-build]`). When that
+   Containerfile changed, increment `release="N"` and the matching `X.Y-N`
+   additional tag once, and set `.tekton/plugin-catalog-builder*.yaml`
+   `BASE_IMAGES` to the same FROM image. Headers are the
    image `node --version`, or the newer `nodejs` RPM from `dnf repoquery`
    inside that image when the Containerfile `dnf`-installs `nodejs` before the
    headers `RUN`. Copy rhdh `.nvm/` only when it is at least that version.
@@ -216,6 +219,7 @@ Do not downgrade. If `go.mod` already pins a newer toolchain (for example `go1.2
 - Copying an older rhdh `.nvm/` onto a catalog builder whose `dnf` nodejs RPM is newer.
 - Handing catalog FROM / overlays `versions.json` to `/rhdh-konflux-tasks`. That skill invokes this one; it does not pin those files.
 - Claiming Node headers / `.nvmrc` are done while plugin-catalog still advertises an old `node-v*` in `konflux.additional-tags`. Name the catalog (and overlays) checkout outcome or that it was out of scope.
+- Leaving builder PipelineRun `BASE_IMAGES` on an older tag after `builder.Containerfile` FROM moved, or incrementing `release` when that Containerfile did not change.
 
 ## Additional resources
 

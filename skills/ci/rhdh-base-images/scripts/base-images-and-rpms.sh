@@ -941,6 +941,138 @@ rewrite_catalog_additional_tags() {
     sed -i -E "s/node-v[0-9]+\\.[0-9]+\\.[0-9]+/node-v${node_plain}/" "${catalog_cf}"
 }
 
+# Increment LABEL release="N" and the matching X.Y-N token in konflux.additional-tags.
+# Leaves version=, rhdh.version=, and node-v* alone. Call once per catalog run.
+bump_catalog_builder_release() {
+    local catalog_cf="$1"
+    [[ -f "${catalog_cf}" ]] || return 0
+    python3 - "${catalog_cf}" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+version_match = re.search(r'(?m)^[ \t]+version="([0-9]+\.[0-9]+)"', text)
+release_match = re.search(r'(?m)^[ \t]+release="([0-9]+)"', text)
+if version_match is None or release_match is None:
+    raise SystemExit(0)
+version = version_match.group(1)
+release = release_match.group(1)
+new_release = str(int(release) + 1)
+text, replaced = re.subn(
+    r'release="' + re.escape(release) + r'"',
+    'release="' + new_release + '"',
+    text,
+    count=1,
+)
+if replaced != 1:
+    raise SystemExit(0)
+tag = version + "-" + release
+new_tag = version + "-" + new_release
+lines = text.splitlines(keepends=True)
+done = False
+rewritten = []
+for line in lines:
+    if (not done) and ("konflux.additional-tags=" in line):
+        line, tag_count = re.subn(
+            re.escape(tag) + r"(?![0-9])",
+            new_tag,
+            line,
+            count=1,
+        )
+        done = tag_count == 1
+    rewritten.append(line)
+path.write_text("".join(rewritten), encoding="utf-8")
+PY
+}
+
+# Point builder PipelineRun BASE_IMAGES at the Containerfile FROM image.
+# Inserts the param when the task exists but the param does not.
+sync_catalog_builder_pipeline_base_image() {
+    local repo_dir="$1"
+    local image="$2"
+    local plr
+    [[ -n "${image}" ]] || return 0
+    shopt -s nullglob
+    for plr in "${repo_dir}"/.tekton/plugin-catalog-builder*.yaml; do
+        python3 - "${plr}" "${image}" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+image = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+if "name: build-source-image" not in text:
+    raise SystemExit(0)
+quoted = '"' + image + '"'
+pattern = re.compile(
+    r"(name: BASE_IMAGES\n[ \t]+value: )(?:\"[^\"]*\"|[^\n]+)"
+)
+if pattern.search(text):
+    updated = pattern.sub(lambda match: match.group(1) + quoted, text, count=1)
+else:
+    marker = text.find("name: build-source-image")
+    rest = text[marker:]
+    param = re.search(r"\n([ \t]+)- name:", rest)
+    run_after = re.search(r"\n([ \t]*)runAfter:", rest)
+    if param is None or run_after is None:
+        raise SystemExit(0)
+    indent = param.group(1)
+    block = (
+        indent
+        + "- name: BASE_IMAGES\n"
+        + indent
+        + "  value: "
+        + quoted
+        + "\n"
+    )
+    at = marker + run_after.start() + 1
+    updated = text[:at] + block + text[at:]
+if updated != text:
+    path.write_text(updated, encoding="utf-8")
+PY
+    done
+    shopt -u nullglob
+}
+
+# Bump release once when builder.Containerfile is dirty, then align PipelineRuns.
+finalize_catalog_builder_metadata() {
+    local catalog_cf="$1"
+    if git diff --quiet -- "${catalog_cf}" 2>/dev/null; then
+        return 0
+    fi
+    if [[ "${CATALOG_RELEASE_BUMPED:-0}" -eq 0 ]]; then
+        bump_catalog_builder_release "${catalog_cf}"
+        CATALOG_RELEASE_BUMPED=1
+    fi
+    local image
+    image=$(rhdh_nodejs_builder_image "${catalog_cf}")
+    [[ -n "${image}" ]] || return 0
+    sync_catalog_builder_pipeline_base_image "." "${image}"
+}
+
+commit_catalog_builder_paths() {
+    local git_branch="$1"
+    local message="$2"
+    local catalog_cf="$3"
+    shift 3
+    finalize_catalog_builder_metadata "${catalog_cf}"
+    local -a plrs=()
+    local plr
+    shopt -s nullglob
+    for plr in .tekton/plugin-catalog-builder*.yaml; do
+        plrs+=("${plr}")
+    done
+    shopt -u nullglob
+    if [[ ${#plrs[@]} -gt 0 ]]; then
+        commit_push_paths "${git_branch}" "${message}" "${catalog_cf}" "${plrs[@]}" "$@"
+    else
+        commit_push_paths "${git_branch}" "${message}" "${catalog_cf}" "$@"
+    fi
+}
+
 copy_nvm_tree() {
     local src="$1"
     local dest="$2"
@@ -987,12 +1119,15 @@ update_plugin_catalog_node() {
         echo "  dry-run: pin ${catalog_cf} FROM to rhdh UBI node image"
         echo "  dry-run: headers from image node --version, or newer dnf repoquery nodejs when the builder dnf-installs nodejs"
         echo "  dry-run: skip copying an older rhdh .nvm/; rewrite konflux.additional-tags node-v*"
+        echo "  dry-run: bump builder release and konflux.additional-tags X.Y-N when ${catalog_cf} changes"
+        echo "  dry-run: set .tekton/plugin-catalog-builder*.yaml BASE_IMAGES to the builder FROM image"
         return 0
     fi
 
     pushd "${repo_dir}" >/dev/null
+    CATALOG_RELEASE_BUMPED=0
     bump_catalog_builder_rhocp "${catalog_cf}"
-    commit_push_paths "${git_branch}" "chore: pin catalog builder rhocp to released OpenShift" \
+    commit_catalog_builder_paths "${git_branch}" "chore: pin catalog builder rhocp to released OpenShift" \
         "${catalog_cf}"
 
     if ! command -v podman >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
@@ -1009,7 +1144,7 @@ update_plugin_catalog_node() {
     if [[ -z "${catalog_image}" ]]; then
         warn "plugin-catalog: no ubi*/nodejs FROM in ${catalog_cf}"
         # FROM / rhocp edits must be pushed before the next branch checkout.
-        commit_push_paths "${git_branch}" "chore: pin catalog builder" "${catalog_cf}"
+        commit_catalog_builder_paths "${git_branch}" "chore: pin catalog builder" "${catalog_cf}"
         popd >/dev/null
         return 0
     fi
@@ -1020,7 +1155,7 @@ update_plugin_catalog_node() {
         # Header resolution can fail after pin_catalog_builder_from already rewrote
         # builder.Containerfile. Commit that rewrite so weekly can open a GitLab MR
         # and the next branch checkout is not blocked by a dirty tree.
-        commit_push_paths "${git_branch}" "chore: pin catalog builder" "${catalog_cf}"
+        commit_catalog_builder_paths "${git_branch}" "chore: pin catalog builder" "${catalog_cf}"
         popd >/dev/null
         return 0
     fi
@@ -1041,8 +1176,8 @@ update_plugin_catalog_node() {
     ensure_node_headers_files "${node_plain}"
     rewrite_catalog_additional_tags "${catalog_cf}" "${node_plain}"
     headers_file=".nvm/releases/node-v${node_plain}-headers.tar.gz"
-    commit_push_paths "${git_branch}" "chore: pin catalog builder to Node v${node_plain}" \
-        .nvmrc "${headers_file}" .nvm/releases/README.adoc "${catalog_cf}"
+    commit_catalog_builder_paths "${git_branch}" "chore: pin catalog builder to Node v${node_plain}" \
+        "${catalog_cf}" .nvmrc "${headers_file}" .nvm/releases/README.adoc
     popd >/dev/null
 }
 
