@@ -980,6 +980,8 @@ update_plugin_catalog_node() {
     catalog_image=$(rhdh_nodejs_builder_image "${catalog_cf}")
     if [[ -z "${catalog_image}" ]]; then
         warn "plugin-catalog: no ubi*/nodejs FROM in ${catalog_cf}"
+        # FROM / rhocp edits must be pushed before the next branch checkout.
+        commit_push_paths "${git_branch}" "chore: pin catalog builder" "${catalog_cf}"
         popd >/dev/null
         return 0
     fi
@@ -987,6 +989,10 @@ update_plugin_catalog_node() {
     node_plain=$(catalog_headers_plain_version "${catalog_cf}" "${catalog_image}")
     if [[ -z "${node_plain}" ]]; then
         warn "plugin-catalog: could not resolve a Node headers version from ${catalog_image}"
+        # Header resolution can fail after pin_catalog_builder_from already rewrote
+        # builder.Containerfile. Commit that rewrite so weekly can open a GitLab MR
+        # and the next branch checkout is not blocked by a dirty tree.
+        commit_push_paths "${git_branch}" "chore: pin catalog builder" "${catalog_cf}"
         popd >/dev/null
         return 0
     fi
