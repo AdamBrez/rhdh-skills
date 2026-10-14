@@ -473,6 +473,60 @@ class TestBaseImagesAndRpmsScript:
         assert "/rhocp/4.21/" not in text
         assert "/ocp-tools/4.22/os/" in text
 
+    def test_rpm_lockfile_prototype_args_bare_for_installroot(self, tmp_path: Path) -> None:
+        helpers = (
+            _extract_bash_function(MAIN_SCRIPT, "containerfile_uses_installroot")
+            + "\n"
+            + _extract_bash_function(MAIN_SCRIPT, "rpm_lockfile_prototype_args")
+        )
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.write_text(
+            "RUN dnf install --installroot /mnt/rootfs openssl --releasever 10 -y\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{helpers}\nrpm_lockfile_prototype_args "$1" "$2"',
+                "bash",
+                str(dockerfile),
+                "Dockerfile",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "--bare rpms.in.yaml"
+
+    def test_rpm_lockfile_prototype_args_layered_uses_containerfile(self, tmp_path: Path) -> None:
+        helpers = (
+            _extract_bash_function(MAIN_SCRIPT, "containerfile_uses_installroot")
+            + "\n"
+            + _extract_bash_function(MAIN_SCRIPT, "rpm_lockfile_prototype_args")
+        )
+        containerfile = tmp_path / "Containerfile"
+        containerfile.write_text(
+            "RUN microdnf install -y tar gzip jq\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{helpers}\nrpm_lockfile_prototype_args "$1" "$2"',
+                "bash",
+                str(containerfile),
+                "Containerfile",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "-f Containerfile rpms.in.yaml"
+
     def test_skill_covers_openshift_el9_beta_rpm_bump(self) -> None:
         skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
         assert "N-el9-beta" in skill
@@ -481,6 +535,10 @@ class TestBaseImagesAndRpmsScript:
         script = MAIN_SCRIPT.read_text(encoding="utf-8")
         assert "bump_openshift_rpm_repos" in script
         assert "bump_catalog_builder_rhocp" in script
+        assert "rpm_lockfile_prototype_args" in script
+        assert "--bare rpms.in.yaml" in script
+        assert "keeping existing rpms.lock.yaml" in script
+        assert "rpm-lockfile-prototype --bare" in skill
         unresolved = script.split(
             'warn "plugin-catalog: could not resolve a Node headers version', 1
         )[1][:500]

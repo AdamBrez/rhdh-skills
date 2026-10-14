@@ -22,7 +22,7 @@
 - Clone: `https://github.com/redhat-developer/rhdh-operator.git`
 - Branches: `main`, `release-1.9`, `release-1.10`, …
 - Base images: `.rhdh/docker/Dockerfile`, root `Dockerfile`
-- RPM lock: `.rhdh/docker/Dockerfile` + `rpms.in.yaml` → `rpms.lock.yaml`
+- RPM lock: root `Dockerfile` or `.rhdh/docker/Dockerfile` + `rpms.in.yaml` → `rpms.lock.yaml`. The `rpm-builder` stage uses `--installroot`; regenerate with `rpm-lockfile-prototype --bare` (not `-f`).
 - Workflow reference: `.github/workflows/update-rpm-lockfile.yaml`
 
 ## GitLab rhidp/rhdh-plugin-catalog

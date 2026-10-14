@@ -540,21 +540,45 @@ bump_catalog_builder_rhocp() {
     bump_rhocp_version_in_file "${catalog_cf}" "${new_ver}"
 }
 
+# Empty --installroot (operator rpm-builder) needs --bare so glibc/coreutils
+# land in the lockfile. Layered installs onto the base image stay on -f.
+containerfile_uses_installroot() {
+    local file="$1"
+    [[ -f "${file}" ]] || return 1
+    grep -qE -- '--installroot' "${file}"
+}
+
+# $1: file to inspect for --installroot
+# $2: Containerfile path passed to -f (relative after cd into the repo)
+# stdout: arguments after the rpm-lockfile-prototype binary.
+rpm_lockfile_prototype_args() {
+    local inspect="$1"
+    local relative="$2"
+    if containerfile_uses_installroot "${inspect}"; then
+        printf '%s\n' "--bare rpms.in.yaml"
+    else
+        printf '%s\n' "-f ${relative} rpms.in.yaml"
+    fi
+}
+
 update_rpm_lockfile() {
     local repo_dir="$1"
     local kind="$2"
     local rpm_tool="$3"
     local branch="$4"
-    local containerfile rpm_err rpm_rc
+    local containerfile rpm_err rpm_rc proto_args
+    local -a proto_cmd=()
     containerfile=$(rpm_containerfile_for "${repo_dir}" "${kind}" "${branch}")
 
     [[ -f "${repo_dir}/${containerfile}" ]] || die "${repo_dir}: missing ${containerfile}"
     [[ -f "${repo_dir}/rpms.in.yaml" ]] || die "${repo_dir}: missing rpms.in.yaml"
 
-    log "RPM lockfile: $(basename "${repo_dir}") using ${containerfile}"
+    proto_args=$(rpm_lockfile_prototype_args "${repo_dir}/${containerfile}" "${containerfile}")
+
+    log "RPM lockfile: $(basename "${repo_dir}") using ${containerfile} (${proto_args})"
     if [[ ${DRY_RUN} -eq 1 ]]; then
         echo "  dry-run: bump OpenShift N-el9-beta URLs in ${repo_dir}/rpms.in.yaml when present"
-        echo "  dry-run: (cd ${repo_dir} && ${rpm_tool} -f ${containerfile} rpms.in.yaml)"
+        echo "  dry-run: (cd ${repo_dir} && ${rpm_tool} ${proto_args})"
         echo "  dry-run: commit and push rpms.in.yaml and rpms.lock.yaml to open base-images PR branch (or chore/automated-update-rpm-lockfile/${branch})"
         return 0
     fi
@@ -564,11 +588,15 @@ update_rpm_lockfile() {
     pushd "${repo_dir}" >/dev/null
     rpm_err=$(mktemp)
     rpm_rc=0
-    "${rpm_tool}" -f "${containerfile}" rpms.in.yaml 2>"${rpm_err}" || rpm_rc=$?
+    read -r -a proto_cmd <<< "${proto_args}"
+    "${rpm_tool}" "${proto_cmd[@]}" 2>"${rpm_err}" || rpm_rc=$?
     filter_rpm_lockfile_source_warnings <"${rpm_err}" >&2
     rm -f "${rpm_err}"
     if [[ ${rpm_rc} -ne 0 ]]; then
         warn "rpm-lockfile-prototype failed for ${repo_dir}; keeping existing rpms.lock.yaml"
+        git checkout -- rpms.lock.yaml rpms.in.yaml 2>/dev/null || true
+        popd >/dev/null
+        return 0
     fi
     commit_push_rpm_lockfile "${branch}"
     popd >/dev/null
