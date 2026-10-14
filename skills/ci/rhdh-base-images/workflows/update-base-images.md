@@ -207,6 +207,7 @@ Do not downgrade. If `go.mod` already pins a newer toolchain (for example `go1.2
 - Treating `rpm-lockfile-prototype` `No sources found for` / "no matching sources" warnings as a failure or remaining risk. The source RPM is often unpublished; the lockfile is still valid.
 - Lowering `go.mod` `toolchain` (or `go`) to match an older UBI Go toolset image. Keep the newer pin.
 - Copying plugin-catalog `.nvm/` headers while leaving `builder.Containerfile` FROM on an older UBI Node tag, or leaving a stale `node-v*` in `konflux.additional-tags`.
+- Returning from a catalog update after `builder.Containerfile` changed but before that file is committed. The next branch checkout then aborts, and weekly never opens a GitLab MR. Push the Containerfile even when Node header resolution fails.
 - Setting catalog headers from the UBI image `node --version` when `builder.Containerfile` `dnf`-installs a newer `nodejs` RPM before the headers `RUN`. That is the 1.10 failure mode: image v24.19.0, module RPM 24.21.0, missing `node-v24.21.0-headers.tar.gz`.
 - Copying an older rhdh `.nvm/` onto a catalog builder whose `dnf` nodejs RPM is newer.
 - Handing catalog FROM / overlays `versions.json` to `/rhdh-konflux-tasks`. That skill invokes this one; it does not pin those files.

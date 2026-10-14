@@ -481,6 +481,10 @@ class TestBaseImagesAndRpmsScript:
         script = MAIN_SCRIPT.read_text(encoding="utf-8")
         assert "bump_openshift_rpm_repos" in script
         assert "bump_catalog_builder_rhocp" in script
+        unresolved = script.split(
+            'warn "plugin-catalog: could not resolve a Node headers version', 1
+        )[1][:500]
+        assert 'commit_push_paths "${git_branch}" "chore: pin catalog builder"' in unresolved
         assert (
             'commit_push_paths "${branch}" "chore: update rpms.lock.yaml [skip-build]" rpms.lock.yaml rpms.in.yaml'
             in script
