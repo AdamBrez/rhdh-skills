@@ -91,27 +91,18 @@ skill.
 Mintmaker's Tekton manager and this skill both touch task pins, and they do
 different jobs.
 
-- `updateDigests.sh` (and weekly maintenance's `updateDigests.sh -q`) only
-  replaces `tag@sha256` for the current tag, then pushes. It does not rename
-  params, drop tasks, or regenerate PipelineRuns.
-- Mintmaker runs the upstream task migration scripts, so it can rewrite YAML
-  (`BUILD_ARGS_FILE` → `BUILD_ARGS_FILES`, `CACHI2_ARTIFACT` →
-  `PREFETCH_ARTIFACT`). It does not run `generatePipelineRuns.sh`. With
-  `additionalBranchPrefix: "{{parentDir}}-"`, `.tekton` and
-  `.tekton-templates` land in separate merge requests.
-- Weekly digest pushes and Mintmaker edits hit the same `value:` lines.
-  `rhidp/rhdh` merges fast-forward only, so those MRs conflict and cannot
-  automerge. Setting `automerge: true` does not fix that.
-
-Do not close a Mintmaker "Konflux references" MR as redundant with a weekly
-digest commit. Same-tag digest lines may already be on the branch. Remaining
-tag bumps (`prefetch-dependencies-oci-ta`, `buildah-oci-ta`,
-`source-build-oci-ta`, dropping `show-sbom` / `summary`) are this skill's
-`--minor` plus `MIGRATION.md` plus `generatePipelineRuns.sh` path.
-
-Digest and same-digest patch updates are the only Mintmaker update types that
-could automerge, and only after weekly stops writing `.tekton` and the two
-directories share one MR. Minor and major bumps stay reviewed here.
+- Weekly maintenance no longer runs `updateDigests.sh`. Mintmaker
+  automerges same-tag digests and patch tags for `rhdh` and
+  `rhdh-plugin-catalog` (`konflux/digests/<branch>`, one MR per branch).
+- Mintmaker runs the upstream task migration scripts, so a minor or major
+  bump can rewrite YAML (`BUILD_ARGS_FILE` → `BUILD_ARGS_FILES`,
+  `CACHI2_ARTIFACT` → `PREFETCH_ARTIFACT`). Those MRs stay
+  `konflux/migrations/<branch>` and do not automerge. Mintmaker does not
+  run `generatePipelineRuns.sh`.
+- Do not close a migration MR as redundant with a digest update. Remaining
+  tag bumps (`prefetch-dependencies-oci-ta`, `buildah-oci-ta`,
+  `source-build-oci-ta`, dropping `show-sbom` / `summary`) are this skill's
+  `--minor` plus `MIGRATION.md` plus `generatePipelineRuns.sh` path.
 
 ## Prefer `-oci-ta` task variants
 
