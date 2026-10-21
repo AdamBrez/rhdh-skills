@@ -86,6 +86,24 @@ skill.
 | `main` (2.1+) | `main` |
 | other `rhdh-<ver>-rhel-<N>` | `release-<ver>` when that GitHub branch exists |
 
+## Boundary with Mintmaker
+
+Mintmaker's Tekton manager and this skill both touch task pins, and they do
+different jobs.
+
+- Weekly maintenance no longer runs `updateDigests.sh`. Mintmaker
+  automerges same-tag digests and patch tags for `rhdh` and
+  `rhdh-plugin-catalog` (`konflux/digests/<branch>`, one MR per branch).
+- Mintmaker runs the upstream task migration scripts, so a minor or major
+  bump can rewrite YAML (`BUILD_ARGS_FILE` → `BUILD_ARGS_FILES`,
+  `CACHI2_ARTIFACT` → `PREFETCH_ARTIFACT`). Those MRs stay
+  `konflux/migrations/<branch>` and do not automerge. Mintmaker does not
+  run `generatePipelineRuns.sh`.
+- Do not close a migration MR as redundant with a digest update. Remaining
+  tag bumps (`prefetch-dependencies-oci-ta`, `buildah-oci-ta`,
+  `source-build-oci-ta`, dropping `show-sbom` / `summary`) are this skill's
+  `--minor` plus `MIGRATION.md` plus `generatePipelineRuns.sh` path.
+
 ## Prefer `-oci-ta` task variants
 
 When the Konflux catalog ships both a workspace-based task and an
