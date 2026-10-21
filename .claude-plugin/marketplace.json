@@ -73,6 +73,7 @@
         "./skills/reference/mutation-gate",
         "./skills/reference/prose-editing",
         "./skills/ci/rhdh-konflux-tasks",
+        "./skills/ci/rhdh-plugin-catalog-index-status-and-update-flow",
         "./skills/ci/rhdh-konflux-rpa",
         "./skills/reference/rhdh-forge",
         "./skills/ci/rhdh-prow-jobs",
