@@ -276,6 +276,15 @@
       "requiresExternalSkills": []
     },
     {
+      "name": "rhdh-plugin-catalog-index-status-and-update-flow",
+      "category": "ci",
+      "invocation": "model",
+      "requiresSkills": [
+        "mutation-gate"
+      ],
+      "requiresExternalSkills": []
+    },
+    {
       "name": "rhdh-konflux-rpa",
       "category": "ci",
       "invocation": "model",
