@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -173,3 +175,78 @@ def test_wait_returns_succeeded_without_following_logs(tmp_path: Path) -> None:
     )
     assert payload["runs"][0]["succeeded"] is True
     assert payload["konfluxUrl"].endswith("/rhdh-plugin-catalog-2/activity/pipelineruns")
+
+
+def test_fetch_text_retries_on_url_error_then_propagates() -> None:
+    """_fetch_text retries once on URLError and raises the original error."""
+    error = urllib.error.URLError("connection refused")
+    mock_urlopen = MagicMock(side_effect=error)
+    with (
+        patch("catalog_index_status.urllib.request.urlopen", mock_urlopen),
+        patch("catalog_index_status.time.sleep") as mock_sleep,
+    ):
+        with pytest.raises(urllib.error.URLError, match="connection refused"):
+            status._fetch_text("https://example.test/file.txt")
+    assert mock_urlopen.call_count == 2
+    mock_sleep.assert_called_once_with(2)
+
+
+def test_fetch_text_no_retry_on_client_error() -> None:
+    """_fetch_text does not retry on 4xx HTTP errors."""
+    error = urllib.error.HTTPError("https://example.test/file.txt", 404, "Not Found", {}, None)
+    mock_urlopen = MagicMock(side_effect=error)
+    with patch("catalog_index_status.urllib.request.urlopen", mock_urlopen):
+        with pytest.raises(urllib.error.HTTPError):
+            status._fetch_text("https://example.test/file.txt")
+    assert mock_urlopen.call_count == 1
+
+
+def test_resolve_target_branch_without_version_falls_back_to_rhdh_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """resolve_target with a branch but no version calls rhdh_version."""
+
+    def runner(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        if "for-each-ref" in argv:
+            return _completed("")
+        return _completed("", 0)
+
+    monkeypatch.setattr(
+        status,
+        "rhdh_version",
+        lambda _branch: (_ for _ in ()).throw(urllib.error.URLError("network down")),
+    )
+    with pytest.raises(urllib.error.URLError, match="network down"):
+        status.resolve_target(branch="main", version=None, catalog_root=None, runner=runner)
+
+
+def test_follow_run_returns_timed_out(tmp_path: Path) -> None:
+    """follow_run returns 'TimedOut' when the deadline elapses."""
+    pending = {
+        "kind": "PipelineRun",
+        "status": {"conditions": [{"type": "Succeeded", "reason": "Running"}]},
+    }
+
+    def runner(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return _completed(json.dumps(pending))
+
+    elapsed = 0.0
+
+    def fake_sleeper(_seconds: float) -> None:
+        nonlocal elapsed
+        elapsed += 100
+
+    def fake_monotonic() -> float:
+        return elapsed
+
+    with patch("catalog_index_status.time.monotonic", fake_monotonic):
+        reason = status.follow_run(
+            namespace="rhdh-tenant",
+            name="build-1",
+            log_path=tmp_path / "build-1.log",
+            timeout_seconds=50,
+            runner=runner,
+            sleeper=fake_sleeper,
+            follow_logs=False,
+        )
+    assert reason == "TimedOut"

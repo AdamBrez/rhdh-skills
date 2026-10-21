@@ -109,10 +109,27 @@ def check_login(runner: Runner = _run) -> dict[str, Any]:
 
 
 def _fetch_text(url: str) -> str:
-    """GET a public URL and return the body."""
+    """GET a public URL and return the body.
+
+    Retries once after a 2-second backoff for transient network errors
+    and server-side (5xx) HTTP failures.
+    """
     request = urllib.request.Request(url, headers={"User-Agent": "rhdh-skills"})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return response.read().decode("utf-8")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        if exc.code < 500:
+            raise
+        first_error: urllib.error.URLError = exc
+    except urllib.error.URLError as exc:
+        first_error = exc
+    time.sleep(2)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.read().decode("utf-8")
+    except urllib.error.URLError:
+        raise first_error from None
 
 
 def rhdh_version(branch: str) -> str:
@@ -557,11 +574,15 @@ def get_pipelinerun(namespace: str, name: str, runner: Runner) -> dict[str, Any]
     return None
 
 
-def _stream_logs(namespace: str, name: str, log_path: Path) -> subprocess.Popen[str]:
-    """Follow Tekton logs into log_path until the caller stops the process."""
+def _stream_logs(namespace: str, name: str, log_path: Path) -> tuple[subprocess.Popen[str], Any]:
+    """Follow Tekton logs into log_path until the caller stops the process.
+
+    Returns the Popen process **and** the open file handle so the caller
+    can close the handle after terminating the process.
+    """
     log_path.parent.mkdir(parents=True, exist_ok=True)
     handle = log_path.open("w", encoding="utf-8")
-    return subprocess.Popen(
+    proc = subprocess.Popen(
         [
             "oc",
             "logs",
@@ -577,6 +598,7 @@ def _stream_logs(namespace: str, name: str, log_path: Path) -> subprocess.Popen[
         stderr=subprocess.STDOUT,
         text=True,
     )
+    return proc, handle
 
 
 def follow_run(
@@ -591,8 +613,9 @@ def follow_run(
 ) -> str:
     """Block until the PipelineRun reaches a terminal reason and return that reason."""
     logs: subprocess.Popen[str] | None = None
+    log_handle: Any = None
     if follow_logs:
-        logs = _stream_logs(namespace, name, log_path)
+        logs, log_handle = _stream_logs(namespace, name, log_path)
     deadline = time.monotonic() + timeout_seconds
     reason = "TimedOut"
     try:
@@ -606,6 +629,8 @@ def follow_run(
     finally:
         if logs is not None and logs.poll() is None:
             logs.terminate()
+        if log_handle is not None:
+            log_handle.close()
     return reason
 
 
