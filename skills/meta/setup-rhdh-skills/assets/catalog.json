@@ -97,6 +97,15 @@
       "requiresExternalSkills": []
     },
     {
+      "name": "rhdh-feature-docs",
+      "category": "jira",
+      "invocation": "model",
+      "requiresSkills": [
+        "prose-editing"
+      ],
+      "requiresExternalSkills": []
+    },
+    {
       "name": "rhdh-backstage-upgrade",
       "category": "plugins",
       "invocation": "model",
@@ -267,6 +276,15 @@
       "requiresExternalSkills": []
     },
     {
+      "name": "rhdh-plugin-catalog-index-status-and-update-flow",
+      "category": "ci",
+      "invocation": "model",
+      "requiresSkills": [
+        "mutation-gate"
+      ],
+      "requiresExternalSkills": []
+    },
+    {
       "name": "rhdh-konflux-rpa",
       "category": "ci",
       "invocation": "model",
@@ -409,6 +427,24 @@
     },
     {
       "name": "rhdh-smoke-tests",
+      "category": "release",
+      "invocation": "model",
+      "requiresSkills": [
+        "mutation-gate"
+      ],
+      "requiresExternalSkills": []
+    },
+    {
+      "name": "rhdh-translation-upload",
+      "category": "release",
+      "invocation": "model",
+      "requiresSkills": [
+        "mutation-gate"
+      ],
+      "requiresExternalSkills": []
+    },
+    {
+      "name": "rhdh-translation-deploy",
       "category": "release",
       "invocation": "model",
       "requiresSkills": [

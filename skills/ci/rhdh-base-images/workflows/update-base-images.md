@@ -148,8 +148,15 @@ updateBaseImages.sh -w REPO_ROOT -b BRANCH -sb SCRIPTS_BRANCH -maxdepth 5 --pr
 Matches each repo's GitHub Action, then commits and pushes to the automation PR:
 
 ```bash
+# Bump rotating OpenShift clients N-el9-beta URLs in rpms.in.yaml first,
+# capped at the latest released 4.y (4.21-el9-beta 404s once 4.22-el9-beta
+# is the newest released stream still on the mirror). Do not follow
+# unreleased directories such as 4.23-el9-beta or 5.1-el9-beta.
+# Layered install onto the base image:
 rpm-lockfile-prototype -f CONTAINERFILE rpms.in.yaml
-git add rpms.lock.yaml
+# Empty --installroot (operator rpm-builder): do not pass -f
+rpm-lockfile-prototype --bare rpms.in.yaml
+git add rpms.in.yaml rpms.lock.yaml
 git commit -s -m "chore: update rpms.lock.yaml [skip-build]"
 git push origin <chore/automated-update-base-images-*>   # same PR as base images
 ```
@@ -170,8 +177,12 @@ the script:
 3. Updates `.nvmrc` (version without `v` prefix) and `.nvm/releases/README.adoc` (date + version)
 4. Removes stale `node-v*-headers.tar.gz` files and pushes to the same automation PR
 5. When a plugin-catalog checkout is in the same run, pins
-   `builder.Containerfile` FROM to the rhdh UBI Node image and rewrites
-   `konflux.additional-tags` `node-v*` (no `[skip-build]`). Headers are the
+   `builder.Containerfile` `/rhocp/4.N/` to the latest released OpenShift 4.y,
+   pins FROM to the rhdh UBI Node image, and rewrites
+   `konflux.additional-tags` `node-v*` (no `[skip-build]`). When that
+   Containerfile changed, increment `release="N"` and the matching `X.Y-N`
+   additional tag once, and set `.tekton/plugin-catalog-builder*.yaml`
+   `BASE_IMAGES` to the same FROM image. Headers are the
    image `node --version`, or the newer `nodejs` RPM from `dnf repoquery`
    inside that image when the Containerfile `dnf`-installs `nodejs` before the
    headers `RUN`. Copy rhdh `.nvm/` only when it is at least that version.
@@ -197,13 +208,18 @@ Do not downgrade. If `go.mod` already pins a newer toolchain (for example `go1.2
 - Running on a branch that does not exist in one of the in-scope repos.
 - Omitting `registry.redhat.io` login before base image updates.
 - Committing `rpms.lock.yaml` without checking the base image minor (e.g. UBI `9.8`) still matches `rpms.in.yaml` repo URLs.
+- Regenerating `rpms.lock.yaml` while `rpms.in.yaml` still points at a vanished OpenShift `N-el9-beta` directory (hermeto FetchError on `openshift-clients`).
+- Solving an `--installroot` Containerfile with `-f` (image rpmdb). openssl then lands without glibc/coreutils; hermetic `dnf install --installroot` fails with `nothing provides`. Use `--bare`.
+- Bumping `rpms.in.yaml` or catalog `builder.Containerfile` `/rhocp/4.N/` to an unreleased OpenShift stream (`4.23`, `5.1`). Those RPMs are signed with a key UBI 9 microdnf cannot verify. Stay on the latest released 4.y.
 - Treating `rpm-lockfile-prototype` `No sources found for` / "no matching sources" warnings as a failure or remaining risk. The source RPM is often unpublished; the lockfile is still valid.
 - Lowering `go.mod` `toolchain` (or `go`) to match an older UBI Go toolset image. Keep the newer pin.
 - Copying plugin-catalog `.nvm/` headers while leaving `builder.Containerfile` FROM on an older UBI Node tag, or leaving a stale `node-v*` in `konflux.additional-tags`.
+- Returning from a catalog update after `builder.Containerfile` changed but before that file is committed. The next branch checkout then aborts, and weekly never opens a GitLab MR. Push the Containerfile even when Node header resolution fails.
 - Setting catalog headers from the UBI image `node --version` when `builder.Containerfile` `dnf`-installs a newer `nodejs` RPM before the headers `RUN`. That is the 1.10 failure mode: image v24.19.0, module RPM 24.21.0, missing `node-v24.21.0-headers.tar.gz`.
 - Copying an older rhdh `.nvm/` onto a catalog builder whose `dnf` nodejs RPM is newer.
 - Handing catalog FROM / overlays `versions.json` to `/rhdh-konflux-tasks`. That skill invokes this one; it does not pin those files.
 - Claiming Node headers / `.nvmrc` are done while plugin-catalog still advertises an old `node-v*` in `konflux.additional-tags`. Name the catalog (and overlays) checkout outcome or that it was out of scope.
+- Leaving builder PipelineRun `BASE_IMAGES` on an older tag after `builder.Containerfile` FROM moved, or incrementing `release` when that Containerfile did not change.
 
 ## Additional resources
 

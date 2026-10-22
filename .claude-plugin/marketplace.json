@@ -61,6 +61,8 @@
         "./skills/reference/rhdh-forge",
         "./skills/release/rhdh-release-sos",
         "./skills/release/rhdh-smoke-tests",
+        "./skills/release/rhdh-translation-upload",
+        "./skills/release/rhdh-translation-deploy",
         "./skills/release/rhdh-test-plan-review"
       ]
     },
@@ -73,6 +75,7 @@
         "./skills/reference/mutation-gate",
         "./skills/reference/prose-editing",
         "./skills/ci/rhdh-konflux-tasks",
+        "./skills/ci/rhdh-plugin-catalog-index-status-and-update-flow",
         "./skills/ci/rhdh-konflux-rpa",
         "./skills/reference/rhdh-forge",
         "./skills/ci/rhdh-prow-jobs",
@@ -122,7 +125,8 @@
         "./skills/jira/rhdh-jira-refine",
         "./skills/jira/rhdh-jira-sprint-plan",
         "./skills/jira/rhdh-jira-sprint-report",
-        "./skills/jira/rhdh-jira-update"
+        "./skills/jira/rhdh-jira-update",
+        "./skills/jira/rhdh-feature-docs"
       ]
     }
   ]

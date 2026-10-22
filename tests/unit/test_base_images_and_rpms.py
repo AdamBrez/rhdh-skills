@@ -302,6 +302,341 @@ class TestBaseImagesAndRpmsScript:
         assert result.returncode == 0, result.stderr
         assert result.stdout == "error: dnf transaction failed\n"
 
+    def test_latest_openshift_el9_beta_stream_from_listing_picks_highest(self) -> None:
+        function = _extract_bash_function(
+            MAIN_SCRIPT, "latest_openshift_el9_beta_stream_from_listing"
+        )
+        listing = (
+            '<a href="4.19-el9-beta/">4.19-el9-beta/</a>\n'
+            '<a href="4.21-el9-beta/">4.21-el9-beta/</a>\n'
+            '<a href="4.22-el9-beta/">4.22-el9-beta/</a>\n'
+            '<a href="4.9-el9-beta/">4.9-el9-beta/</a>\n'
+        )
+        result = subprocess.run(
+            ["bash", "-c", f"{function}\nlatest_openshift_el9_beta_stream_from_listing"],
+            input=listing,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "4.22-el9-beta"
+
+    def test_bump_openshift_rpm_repos_in_file_rewrites_url_and_repoid(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "bump_openshift_rpm_repos_in_file")
+        rpms_in = tmp_path / "rpms.in.yaml"
+        rpms_in.write_text(
+            "    - repoid: rhocp-4.21-for-rhel-9-$basearch-rpms\n"
+            "      baseurl: https://mirror.openshift.com/pub/openshift-v4/"
+            "$basearch/dependencies/rpms/4.21-el9-beta/\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function}\nbump_openshift_rpm_repos_in_file "$1" "$2"',
+                "bash",
+                str(rpms_in),
+                "4.22-el9-beta",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        text = rpms_in.read_text(encoding="utf-8")
+        assert "4.22-el9-beta" in text
+        assert "rhocp-4.22-for-rhel-9-$basearch-rpms" in text
+        assert "4.21-el9-beta" not in text
+        assert "rhocp-4.21-for-rhel-9-" not in text
+
+    def test_bump_openshift_rpm_repos_in_file_noop_when_already_latest(
+        self, tmp_path: Path
+    ) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "bump_openshift_rpm_repos_in_file")
+        original = (
+            "    - repoid: rhocp-4.22-for-rhel-9-$basearch-rpms\n"
+            "      baseurl: https://mirror.openshift.com/pub/openshift-v4/"
+            "$basearch/dependencies/rpms/4.22-el9-beta/\n"
+        )
+        rpms_in = tmp_path / "rpms.in.yaml"
+        rpms_in.write_text(original, encoding="utf-8")
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function}\nbump_openshift_rpm_repos_in_file "$1" "$2"',
+                "bash",
+                str(rpms_in),
+                "4.22-el9-beta",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert rpms_in.read_text(encoding="utf-8") == original
+
+    def test_released_openshift_4y_versions_from_json_keeps_plain_4y(self) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "released_openshift_4y_versions_from_json")
+        payload = (
+            '{"data":[{"versions":['
+            '{"name":"4.22"},{"name":"4.21"},{"name":"4.6 EUS"},{"name":"3"}'
+            "]}]}"
+        )
+        result = subprocess.run(
+            ["bash", "-c", f"{function}\nreleased_openshift_4y_versions_from_json"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.split() == ["4.21", "4.22"]
+
+    def test_released_el9_beta_stream_ignores_unreleased_directories(self) -> None:
+        function = _extract_bash_function(
+            MAIN_SCRIPT, "latest_released_openshift_el9_beta_stream_from_listing"
+        )
+        listing = (
+            '<a href="4.22-el9-beta/">4.22-el9-beta/</a>\n'
+            '<a href="4.23-el9-beta/">4.23-el9-beta/</a>\n'
+            '<a href="5.1-el9-beta/">5.1-el9-beta/</a>\n'
+        )
+        released = "4.20\n4.21\n4.22\n"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function}\nlatest_released_openshift_el9_beta_stream_from_listing "$1"',
+                "bash",
+                released,
+            ],
+            input=listing,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "4.22-el9-beta"
+
+    def test_released_el9_beta_stream_empty_when_only_unreleased(self) -> None:
+        function = _extract_bash_function(
+            MAIN_SCRIPT, "latest_released_openshift_el9_beta_stream_from_listing"
+        )
+        listing = '<a href="5.1-el9-beta/">5.1-el9-beta/</a>\n'
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function}\nlatest_released_openshift_el9_beta_stream_from_listing "$1"',
+                "bash",
+                "4.22\n",
+            ],
+            input=listing,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == ""
+
+    def test_bump_rhocp_version_in_file_rewrites_rhocp_only(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "bump_rhocp_version_in_file")
+        containerfile = tmp_path / "builder.Containerfile"
+        containerfile.write_text(
+            "dnf config-manager --add-repo "
+            "https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel10/"
+            "x86_64/ocp-tools/4.22/os/ -q\n"
+            "dnf config-manager --add-repo "
+            "https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel10/"
+            "x86_64/rhocp/4.21/os/ -q\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function}\nbump_rhocp_version_in_file "$1" "$2"',
+                "bash",
+                str(containerfile),
+                "4.22",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        text = containerfile.read_text(encoding="utf-8")
+        assert "/rhocp/4.22/os/" in text
+        assert "/rhocp/4.21/" not in text
+        assert "/ocp-tools/4.22/os/" in text
+
+    def test_bump_catalog_builder_release_increments_suffix(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "bump_catalog_builder_release")
+        containerfile = tmp_path / "builder.Containerfile"
+        containerfile.write_text(
+            '      version="2.2" \\\n'
+            '      release="3" \\\n'
+            '      rhdh.version="2.2.0" \\\n'
+            '      konflux.additional-tags="next, 2.2, 2.2.0, 2.2-3, '
+            'node-v${NODE_VERSION}" \\\n',
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function}\nbump_catalog_builder_release "$1"',
+                "bash",
+                str(containerfile),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        text = containerfile.read_text(encoding="utf-8")
+        assert 'version="2.2"' in text
+        assert 'release="4"' in text
+        assert 'rhdh.version="2.2.0"' in text
+        assert 'konflux.additional-tags="next, 2.2, 2.2.0, 2.2-4, node-v${NODE_VERSION}"' in text
+
+    def test_sync_catalog_builder_pipeline_base_image_sets_and_inserts(
+        self, tmp_path: Path
+    ) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "sync_catalog_builder_pipeline_base_image")
+        tekton = tmp_path / ".tekton"
+        tekton.mkdir()
+        image = (
+            "registry.access.redhat.com/ubi10/nodejs-24:10.2-1"
+            "@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )
+        existing = tekton / "plugin-catalog-builder-2-push.yaml"
+        existing.write_text(
+            "    - name: build-source-image\n"
+            "      params:\n"
+            "      - name: BINARY_IMAGE\n"
+            '        value: "quay.io/example:old"\n'
+            "      - name: BASE_IMAGES\n"
+            '        value: "registry.access.redhat.com/ubi10/nodejs-24:old"\n'
+            "      runAfter:\n"
+            "      - build-image-index\n",
+            encoding="utf-8",
+        )
+        missing = tekton / "plugin-catalog-builder-2-1-push.yaml"
+        missing.write_text(
+            "    - name: build-source-image\n"
+            "      params:\n"
+            "      - name: BINARY_IMAGE\n"
+            '        value: "quay.io/example:old"\n'
+            "      runAfter:\n"
+            "      - build-image-index\n",
+            encoding="utf-8",
+        )
+        other = tekton / "plugin-catalog-index-2-push.yaml"
+        other.write_text("name: build-source-image\n", encoding="utf-8")
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{function}\nsync_catalog_builder_pipeline_base_image "$1" "$2"',
+                "bash",
+                str(tmp_path),
+                image,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        updated = existing.read_text(encoding="utf-8")
+        inserted = missing.read_text(encoding="utf-8")
+        assert f'value: "{image}"' in updated
+        assert "nodejs-24:old" not in updated
+        assert f'name: BASE_IMAGES\n        value: "{image}"' in inserted
+        assert inserted.index("BASE_IMAGES") < inserted.index("runAfter")
+        assert other.read_text(encoding="utf-8") == "name: build-source-image\n"
+
+    def test_rpm_lockfile_prototype_args_bare_for_installroot(self, tmp_path: Path) -> None:
+        helpers = (
+            _extract_bash_function(MAIN_SCRIPT, "containerfile_uses_installroot")
+            + "\n"
+            + _extract_bash_function(MAIN_SCRIPT, "rpm_lockfile_prototype_args")
+        )
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.write_text(
+            "RUN dnf install --installroot /mnt/rootfs openssl --releasever 10 -y\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{helpers}\nrpm_lockfile_prototype_args "$1" "$2"',
+                "bash",
+                str(dockerfile),
+                "Dockerfile",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "--bare rpms.in.yaml"
+
+    def test_rpm_lockfile_prototype_args_layered_uses_containerfile(self, tmp_path: Path) -> None:
+        helpers = (
+            _extract_bash_function(MAIN_SCRIPT, "containerfile_uses_installroot")
+            + "\n"
+            + _extract_bash_function(MAIN_SCRIPT, "rpm_lockfile_prototype_args")
+        )
+        containerfile = tmp_path / "Containerfile"
+        containerfile.write_text(
+            "RUN microdnf install -y tar gzip jq\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{helpers}\nrpm_lockfile_prototype_args "$1" "$2"',
+                "bash",
+                str(containerfile),
+                "Containerfile",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "-f Containerfile rpms.in.yaml"
+
+    def test_skill_covers_openshift_el9_beta_rpm_bump(self) -> None:
+        skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+        assert "N-el9-beta" in skill
+        assert "latest released" in skill
+        assert "/rhocp/4.N/" in skill
+        script = MAIN_SCRIPT.read_text(encoding="utf-8")
+        assert "bump_openshift_rpm_repos" in script
+        assert "bump_catalog_builder_rhocp" in script
+        assert "rpm_lockfile_prototype_args" in script
+        assert "--bare rpms.in.yaml" in script
+        assert "keeping existing rpms.lock.yaml" in script
+        assert "rpm-lockfile-prototype --bare" in skill
+        unresolved = script.split(
+            'warn "plugin-catalog: could not resolve a Node headers version', 1
+        )[1][:500]
+        assert (
+            'commit_catalog_builder_paths "${git_branch}" "chore: pin catalog builder"'
+            in unresolved
+        )
+        assert (
+            'commit_push_paths "${branch}" "chore: update rpms.lock.yaml [skip-build]" rpms.lock.yaml rpms.in.yaml'
+            in script
+        )
+
     def test_skill_forbids_go_toolchain_downgrade(self) -> None:
         skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
         assert "Never lower `go` or `toolchain`" in skill
@@ -331,6 +666,102 @@ class TestBaseImagesAndRpmsScript:
             )
             assert result.returncode == 0, result.stderr
             assert result.stdout.strip() == catalog_branch
+
+    @pytest.mark.parametrize(
+        ("branch", "marker", "expected"),
+        [
+            ("main", "cmd/gather", "rhdh-must-gather"),
+            ("release-2.1", "cmd/gather", "rhdh-must-gather"),
+            ("release-1.10", "collection-scripts", "rhdh-must-gather"),
+            ("release-1.10", "cmd/gather", "unknown"),
+            ("main", "collection-scripts", "unknown"),
+        ],
+    )
+    def test_detect_repo_kind_must_gather_markers(
+        self, tmp_path: Path, branch: str, marker: str, expected: str
+    ) -> None:
+        detect = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
+        present = _extract_bash_function(MAIN_SCRIPT, "must_gather_marker_present")
+        repo = tmp_path / "must-gather"
+        (repo / marker).mkdir(parents=True)
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{present}\n{detect}\nBRANCH={branch} detect_repo_kind "$1"',
+                "bash",
+                str(repo),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == expected
+
+    def test_detect_repo_kind_must_gather_uses_target_branch_tree(self, tmp_path: Path) -> None:
+        detect = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
+        present = _extract_bash_function(MAIN_SCRIPT, "must_gather_marker_present")
+        repo = tmp_path / "must-gather"
+        repo.mkdir()
+        git = ["git", "-C", str(repo), "-c", "user.email=test@example.com", "-c", "user.name=test"]
+        subprocess.run([*git, "init", "-b", "main"], check=True, capture_output=True)
+        (repo / "cmd" / "gather").mkdir(parents=True)
+        (repo / "cmd" / "gather" / "keep").write_text("ok\n")
+        subprocess.run([*git, "add", "cmd"], check=True, capture_output=True)
+        subprocess.run([*git, "commit", "-m", "gather"], check=True, capture_output=True)
+        subprocess.run([*git, "checkout", "-b", "other"], check=True, capture_output=True)
+        subprocess.run([*git, "rm", "-r", "cmd"], check=True, capture_output=True)
+        subprocess.run([*git, "commit", "-m", "drop gather"], check=True, capture_output=True)
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{present}\n{detect}\nBRANCH=main detect_repo_kind "$1"',
+                "bash",
+                str(repo),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "rhdh-must-gather"
+
+    def test_detect_repo_kind_hub_lockfiles_are_not_must_gather(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
+        repo = tmp_path / "rhdh"
+        repo.mkdir()
+        (repo / "package.json").write_text("{}\n")
+        (repo / "rpms.in.yaml").write_text("packages: []\n")
+        (repo / "rpms.lock.yaml").write_text("lockfileVersion: 1\n")
+        result = subprocess.run(
+            ["bash", "-c", f'{function}\ndetect_repo_kind "$1"', "bash", str(repo)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "rhdh"
+
+    def test_detect_repo_kind_operator_lockfiles_are_not_must_gather(self, tmp_path: Path) -> None:
+        function = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")
+        repo = tmp_path / "operator"
+        repo.mkdir()
+        (repo / "Dockerfile").write_text("FROM registry.access.redhat.com/ubi9/ubi:latest\n")
+        (repo / "go.mod").write_text(
+            "module github.com/redhat-developer/rhdh-operator\n\ngo 1.24.0\n"
+        )
+        (repo / "rpms.in.yaml").write_text("packages: []\n")
+        (repo / "rpms.lock.yaml").write_text("lockfileVersion: 1\n")
+        result = subprocess.run(
+            ["bash", "-c", f'{function}\ndetect_repo_kind "$1"', "bash", str(repo)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "rhdh-operator"
 
     def test_detect_repo_kind_plugin_catalog(self, tmp_path: Path) -> None:
         function = _extract_bash_function(MAIN_SCRIPT, "detect_repo_kind")

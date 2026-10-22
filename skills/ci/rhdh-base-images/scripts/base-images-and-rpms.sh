@@ -158,9 +158,7 @@ catalog_git_branch_for() {
 
 detect_repo_kind() {
     local repo_dir="$1"
-    if [[ -f "${repo_dir}/Containerfile" && -f "${repo_dir}/rpms.in.yaml" && -d "${repo_dir}/collection-scripts" ]]; then
-        echo "rhdh-must-gather"
-    elif [[ -f "${repo_dir}/go.mod" ]] \
+    if [[ -f "${repo_dir}/go.mod" ]] \
         && grep -q '^module github.com/redhat-developer/rhdh-operator' "${repo_dir}/go.mod" 2>/dev/null; then
         echo "rhdh-operator"
     elif [[ -f "${repo_dir}/build/containerfiles/builder.Containerfile" && -f "${repo_dir}/.nvmrc" ]] \
@@ -173,9 +171,40 @@ detect_repo_kind() {
         echo "rhdh-plugin-export-overlays"
     elif [[ -f "${repo_dir}/rpms.in.yaml" ]] && [[ -f "${repo_dir}/package.json" ]]; then
         echo "rhdh"
+    elif must_gather_marker_present "${repo_dir}" "${BRANCH:-}"; then
+        echo "rhdh-must-gather"
     else
         echo "unknown"
     fi
+}
+
+# cmd/gather/ on main and release-2.*; collection-scripts/ on release-1.10.
+# When the checkout is a git repo, read the target branch tree so detection
+# does not depend on whichever branch is currently checked out.
+must_gather_marker_present() {
+    local repo_dir="$1"
+    local branch="$2"
+    local marker=""
+
+    if [[ "${branch}" == "main" || "${branch}" == release-2.* ]]; then
+        marker="cmd/gather"
+    elif [[ "${branch}" == "release-1.10" ]]; then
+        marker="collection-scripts"
+    else
+        return 1
+    fi
+
+    if [[ -e "${repo_dir}/.git" ]] \
+        && git -C "${repo_dir}" rev-parse --verify --quiet "refs/remotes/origin/${branch}" >/dev/null; then
+        git -C "${repo_dir}" cat-file -e "origin/${branch}:${marker}" 2>/dev/null
+        return
+    fi
+    if [[ -e "${repo_dir}/.git" ]] \
+        && git -C "${repo_dir}" rev-parse --verify --quiet "refs/heads/${branch}" >/dev/null; then
+        git -C "${repo_dir}" cat-file -e "${branch}:${marker}" 2>/dev/null
+        return
+    fi
+    [[ -d "${repo_dir}/${marker}" ]]
 }
 
 rhdh_nodejs_containerfile() {
@@ -381,32 +410,193 @@ filter_rpm_lockfile_source_warnings() {
     grep -viE -- 'no sources found for |no matching sources' || true
 }
 
+# Product life cycle behind
+# https://access.redhat.com/support/policy/updates/openshift#dates
+# The #dates section points here; unreleased streams (4.23, 5.1) are absent.
+OPENSHIFT_LIFECYCLE_PRODUCTS_URL="https://access.redhat.com/product-life-cycles/api/v1/products?name=Red%20Hat%20OpenShift%20Container%20Platform"
+
+# stdin: lifecycle products JSON. stdout: released 4.N versions, one per line.
+# Names like "4.6 EUS" and "3" are ignored. No braces: unit tests extract this
+# function by counting '{' and '}'.
+released_openshift_4y_versions_from_json() {
+    python3 -c 'import json, re, sys
+payload = json.load(sys.stdin)
+versions = payload["data"][0]["versions"]
+minors = []
+for item in versions:
+    match = re.fullmatch(r"4\.(\d+)", item.get("name", ""))
+    if match:
+        minors.append(int(match.group(1)))
+for minor in sorted(set(minors)):
+    print("4.%d" % minor)
+'
+}
+
+released_openshift_4y_versions() {
+    local payload
+    payload=$(curl -fsSL "${OPENSHIFT_LIFECYCLE_PRODUCTS_URL}") || return 1
+    printf '%s\n' "${payload}" | released_openshift_4y_versions_from_json
+}
+
+latest_released_openshift_4y() {
+    released_openshift_4y_versions | sort -t. -k1,1n -k2,2n | tail -1
+}
+
+# OpenShift clients RPMs are published under rotating N-el9-beta directories
+# (4.21-el9-beta 404s once 4.22-el9-beta is the current stream). Parse a directory
+# listing; pick the highest N.M-el9-beta token. This does not apply the release
+# cap — callers that rewrite repos use latest_released_openshift_el9_beta_stream_from_listing.
+latest_openshift_el9_beta_stream_from_listing() {
+    grep -oE '[0-9]+\.[0-9]+-el9-beta' | sort -u | sort -t. -k1,1n -k2,2n | tail -1
+}
+
+# stdin: mirror directory listing.
+# $1: newline-separated released versions (4.22, 4.21, ...).
+# stdout: highest N.M-el9-beta whose N.M is released, or nothing.
+latest_released_openshift_el9_beta_stream_from_listing() {
+    local released_versions="$1"
+    local stream ver selected=""
+    while IFS= read -r stream; do
+        [[ -n "${stream}" ]] || continue
+        ver="${stream%-el9-beta}"
+        if printf '%s\n' "${released_versions}" | grep -qxF -- "${ver}"; then
+            selected="${stream}"
+        fi
+    done < <(grep -oE '[0-9]+\.[0-9]+-el9-beta' | sort -u | sort -t. -k1,1n -k2,2n || true)
+    if [[ -n "${selected}" ]]; then
+        printf '%s\n' "${selected}"
+    fi
+}
+
+latest_openshift_el9_beta_stream() {
+    local listing released
+    listing=$(curl -fsSL 'https://mirror.openshift.com/pub/openshift-v4/amd64/dependencies/rpms/') || return 1
+    released=$(released_openshift_4y_versions) || return 1
+    printf '%s\n' "${listing}" | latest_released_openshift_el9_beta_stream_from_listing "${released}"
+}
+
+# Rewrite rpms.in.yaml OpenShift clients baseurl and rhocp-N-for-rhel-9 repoids.
+bump_openshift_rpm_repos_in_file() {
+    local file="$1"
+    local new_stream="$2"
+    local old_stream old_ver new_ver
+    [[ -f "${file}" ]] || return 0
+    [[ -n "${new_stream}" ]] || return 0
+    new_ver="${new_stream%-el9-beta}"
+    while IFS= read -r old_stream; do
+        [[ -n "${old_stream}" ]] || continue
+        [[ "${old_stream}" != "${new_stream}" ]] || continue
+        old_ver="${old_stream%-el9-beta}"
+        sed -i \
+            -e "s|dependencies/rpms/${old_stream}|dependencies/rpms/${new_stream}|g" \
+            -e "s|rhocp-${old_ver}-for-rhel-9-|rhocp-${new_ver}-for-rhel-9-|g" \
+            "${file}"
+    done < <(grep -oE '[0-9]+\.[0-9]+-el9-beta' "${file}" | sort -u)
+}
+
+bump_openshift_rpm_repos() {
+    local repo_dir="$1"
+    local file="${repo_dir}/rpms.in.yaml"
+    local new_stream
+    [[ -f "${file}" ]] || return 0
+    if ! grep -qE 'dependencies/rpms/[0-9]+\.[0-9]+-el9-beta' "${file}"; then
+        log "RPM repos: no OpenShift N-el9-beta URL in ${file}"
+        return 0
+    fi
+    new_stream=$(latest_openshift_el9_beta_stream) || {
+        warn "RPM repos: could not resolve a released OpenShift 4.y el9-beta stream; leaving rpms.in.yaml"
+        return 0
+    }
+    if [[ -z "${new_stream}" ]]; then
+        warn "RPM repos: no released 4.y el9-beta directory on the mirror; leaving rpms.in.yaml"
+        return 0
+    fi
+    log "RPM repos: latest released OpenShift el9-beta stream is ${new_stream}"
+    bump_openshift_rpm_repos_in_file "${file}" "${new_stream}"
+}
+
+# Rewrite /rhocp/4.N/ in a Containerfile to a released 4.y. Leaves ocp-tools alone.
+bump_rhocp_version_in_file() {
+    local file="$1"
+    local new_ver="$2"
+    [[ -f "${file}" ]] || return 0
+    [[ "${new_ver}" =~ ^4\.[0-9]+$ ]] || return 0
+    grep -qE '/rhocp/4\.[0-9]+/' "${file}" || return 0
+    sed -i -E "s|/rhocp/4\\.[0-9]+/|/rhocp/${new_ver}/|g" "${file}"
+}
+
+bump_catalog_builder_rhocp() {
+    local catalog_cf="$1"
+    local new_ver
+    new_ver=$(latest_released_openshift_4y) || {
+        warn "plugin-catalog: could not read released OpenShift 4.y versions; leaving rhocp URL"
+        return 0
+    }
+    if [[ -z "${new_ver}" ]]; then
+        warn "plugin-catalog: lifecycle API listed no OpenShift 4.y versions; leaving rhocp URL"
+        return 0
+    fi
+    log "plugin-catalog: pin rhocp repo to released ${new_ver}"
+    bump_rhocp_version_in_file "${catalog_cf}" "${new_ver}"
+}
+
+# Empty --installroot (operator rpm-builder) needs --bare so glibc/coreutils
+# land in the lockfile. Layered installs onto the base image stay on -f.
+containerfile_uses_installroot() {
+    local file="$1"
+    [[ -f "${file}" ]] || return 1
+    grep -qE -- '--installroot' "${file}"
+}
+
+# $1: file to inspect for --installroot
+# $2: Containerfile path passed to -f (relative after cd into the repo)
+# stdout: arguments after the rpm-lockfile-prototype binary.
+rpm_lockfile_prototype_args() {
+    local inspect="$1"
+    local relative="$2"
+    if containerfile_uses_installroot "${inspect}"; then
+        printf '%s\n' "--bare rpms.in.yaml"
+    else
+        printf '%s\n' "-f ${relative} rpms.in.yaml"
+    fi
+}
+
 update_rpm_lockfile() {
     local repo_dir="$1"
     local kind="$2"
     local rpm_tool="$3"
     local branch="$4"
-    local containerfile rpm_err rpm_rc
+    local containerfile rpm_err rpm_rc proto_args
+    local -a proto_cmd=()
     containerfile=$(rpm_containerfile_for "${repo_dir}" "${kind}" "${branch}")
 
     [[ -f "${repo_dir}/${containerfile}" ]] || die "${repo_dir}: missing ${containerfile}"
     [[ -f "${repo_dir}/rpms.in.yaml" ]] || die "${repo_dir}: missing rpms.in.yaml"
 
-    log "RPM lockfile: $(basename "${repo_dir}") using ${containerfile}"
+    proto_args=$(rpm_lockfile_prototype_args "${repo_dir}/${containerfile}" "${containerfile}")
+
+    log "RPM lockfile: $(basename "${repo_dir}") using ${containerfile} (${proto_args})"
     if [[ ${DRY_RUN} -eq 1 ]]; then
-        echo "  dry-run: (cd ${repo_dir} && ${rpm_tool} -f ${containerfile} rpms.in.yaml)"
-        echo "  dry-run: commit and push rpms.lock.yaml to open base-images PR branch (or chore/automated-update-rpm-lockfile/${branch})"
+        echo "  dry-run: bump OpenShift N-el9-beta URLs in ${repo_dir}/rpms.in.yaml when present"
+        echo "  dry-run: (cd ${repo_dir} && ${rpm_tool} ${proto_args})"
+        echo "  dry-run: commit and push rpms.in.yaml and rpms.lock.yaml to open base-images PR branch (or chore/automated-update-rpm-lockfile/${branch})"
         return 0
     fi
+
+    bump_openshift_rpm_repos "${repo_dir}"
 
     pushd "${repo_dir}" >/dev/null
     rpm_err=$(mktemp)
     rpm_rc=0
-    "${rpm_tool}" -f "${containerfile}" rpms.in.yaml 2>"${rpm_err}" || rpm_rc=$?
+    read -r -a proto_cmd <<< "${proto_args}"
+    "${rpm_tool}" "${proto_cmd[@]}" 2>"${rpm_err}" || rpm_rc=$?
     filter_rpm_lockfile_source_warnings <"${rpm_err}" >&2
     rm -f "${rpm_err}"
     if [[ ${rpm_rc} -ne 0 ]]; then
         warn "rpm-lockfile-prototype failed for ${repo_dir}; keeping existing rpms.lock.yaml"
+        git checkout -- rpms.lock.yaml rpms.in.yaml 2>/dev/null || true
+        popd >/dev/null
+        return 0
     fi
     commit_push_rpm_lockfile "${branch}"
     popd >/dev/null
@@ -751,6 +941,134 @@ rewrite_catalog_additional_tags() {
     sed -i -E "s/node-v[0-9]+\\.[0-9]+\\.[0-9]+/node-v${node_plain}/" "${catalog_cf}"
 }
 
+# Increment LABEL release="N" and the matching X.Y-N token in konflux.additional-tags.
+# Leaves version=, rhdh.version=, and node-v* alone. Call once per catalog run.
+bump_catalog_builder_release() {
+    local catalog_cf="$1"
+    [[ -f "${catalog_cf}" ]] || return 0
+    python3 - "${catalog_cf}" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+version_match = re.search(r'(?m)^[ \t]+version="([0-9]+\.[0-9]+)"', text)
+release_match = re.search(r'(?m)^[ \t]+release="([0-9]+)"', text)
+if version_match is None or release_match is None:
+    raise SystemExit(0)
+version = version_match.group(1)
+release = release_match.group(1)
+new_release = str(int(release) + 1)
+text, replaced = re.subn(
+    r'release="' + re.escape(release) + r'"',
+    'release="' + new_release + '"',
+    text,
+    count=1,
+)
+if replaced != 1:
+    raise SystemExit(0)
+tag = version + "-" + release
+new_tag = version + "-" + new_release
+lines = text.splitlines(keepends=True)
+done = False
+rewritten = []
+for line in lines:
+    if (not done) and ("konflux.additional-tags=" in line):
+        if tag in line:
+            line = line.replace(tag, new_tag, 1)
+            done = True
+    rewritten.append(line)
+path.write_text("".join(rewritten), encoding="utf-8")
+PY
+}
+
+# Point builder PipelineRun BASE_IMAGES at the Containerfile FROM image.
+# Inserts the param when the task exists but the param does not.
+sync_catalog_builder_pipeline_base_image() {
+    local repo_dir="$1"
+    local image="$2"
+    local plr
+    [[ -n "${image}" ]] || return 0
+    shopt -s nullglob
+    for plr in "${repo_dir}"/.tekton/plugin-catalog-builder*.yaml; do
+        python3 - "${plr}" "${image}" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+image = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+if "name: build-source-image" not in text:
+    raise SystemExit(0)
+quoted = '"' + image + '"'
+pattern = re.compile(
+    r"(name: BASE_IMAGES\n[ \t]+value: )(?:\"[^\"]*\"|[^\n]+)"
+)
+if pattern.search(text):
+    updated = pattern.sub(lambda match: match.group(1) + quoted, text, count=1)
+else:
+    marker = text.find("name: build-source-image")
+    rest = text[marker:]
+    param = re.search(r"\n([ \t]+)- name:", rest)
+    run_after = re.search(r"\n([ \t]*)runAfter:", rest)
+    if param is None or run_after is None:
+        raise SystemExit(0)
+    indent = param.group(1)
+    block = (
+        indent
+        + "- name: BASE_IMAGES\n"
+        + indent
+        + "  value: "
+        + quoted
+        + "\n"
+    )
+    at = marker + run_after.start() + 1
+    updated = text[:at] + block + text[at:]
+if updated != text:
+    path.write_text(updated, encoding="utf-8")
+PY
+    done
+    shopt -u nullglob
+}
+
+# Bump release once when builder.Containerfile is dirty, then align PipelineRuns.
+finalize_catalog_builder_metadata() {
+    local catalog_cf="$1"
+    if git diff --quiet -- "${catalog_cf}" 2>/dev/null; then
+        return 0
+    fi
+    if [[ "${CATALOG_RELEASE_BUMPED:-0}" -eq 0 ]]; then
+        bump_catalog_builder_release "${catalog_cf}"
+        CATALOG_RELEASE_BUMPED=1
+    fi
+    local image
+    image=$(rhdh_nodejs_builder_image "${catalog_cf}")
+    [[ -n "${image}" ]] || return 0
+    sync_catalog_builder_pipeline_base_image "." "${image}"
+}
+
+commit_catalog_builder_paths() {
+    local git_branch="$1"
+    local message="$2"
+    local catalog_cf="$3"
+    shift 3
+    finalize_catalog_builder_metadata "${catalog_cf}"
+    local -a plrs=()
+    local plr
+    shopt -s nullglob
+    for plr in .tekton/plugin-catalog-builder*.yaml; do
+        plrs+=("${plr}")
+    done
+    shopt -u nullglob
+    if [[ ${#plrs[@]} -gt 0 ]]; then
+        commit_push_paths "${git_branch}" "${message}" "${catalog_cf}" "${plrs[@]}" "$@"
+    else
+        commit_push_paths "${git_branch}" "${message}" "${catalog_cf}" "$@"
+    fi
+}
+
 copy_nvm_tree() {
     local src="$1"
     local dest="$2"
@@ -793,18 +1111,26 @@ update_plugin_catalog_node() {
     fi
 
     if [[ ${DRY_RUN} -eq 1 ]]; then
+        echo "  dry-run: pin ${catalog_cf} /rhocp/4.N/ to the latest released OpenShift 4.y"
         echo "  dry-run: pin ${catalog_cf} FROM to rhdh UBI node image"
         echo "  dry-run: headers from image node --version, or newer dnf repoquery nodejs when the builder dnf-installs nodejs"
         echo "  dry-run: skip copying an older rhdh .nvm/; rewrite konflux.additional-tags node-v*"
-        return 0
-    fi
-
-    if ! command -v podman >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
-        warn "plugin-catalog: podman or docker required to resolve node headers; skipping"
+        echo "  dry-run: bump builder release and konflux.additional-tags X.Y-N when ${catalog_cf} changes"
+        echo "  dry-run: set .tekton/plugin-catalog-builder*.yaml BASE_IMAGES to the builder FROM image"
         return 0
     fi
 
     pushd "${repo_dir}" >/dev/null
+    CATALOG_RELEASE_BUMPED=0
+    bump_catalog_builder_rhocp "${catalog_cf}"
+    commit_catalog_builder_paths "${git_branch}" "chore: pin catalog builder rhocp to released OpenShift" \
+        "${catalog_cf}"
+
+    if ! command -v podman >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
+        warn "plugin-catalog: podman or docker required to resolve node headers; skipping"
+        popd >/dev/null
+        return 0
+    fi
     if [[ -n "${src_image}" ]]; then
         pin_catalog_builder_from "${catalog_cf}" "${src_image}"
     fi
@@ -813,6 +1139,8 @@ update_plugin_catalog_node() {
     catalog_image=$(rhdh_nodejs_builder_image "${catalog_cf}")
     if [[ -z "${catalog_image}" ]]; then
         warn "plugin-catalog: no ubi*/nodejs FROM in ${catalog_cf}"
+        # FROM / rhocp edits must be pushed before the next branch checkout.
+        commit_catalog_builder_paths "${git_branch}" "chore: pin catalog builder" "${catalog_cf}"
         popd >/dev/null
         return 0
     fi
@@ -820,6 +1148,10 @@ update_plugin_catalog_node() {
     node_plain=$(catalog_headers_plain_version "${catalog_cf}" "${catalog_image}")
     if [[ -z "${node_plain}" ]]; then
         warn "plugin-catalog: could not resolve a Node headers version from ${catalog_image}"
+        # Header resolution can fail after pin_catalog_builder_from already rewrote
+        # builder.Containerfile. Commit that rewrite so weekly can open a GitLab MR
+        # and the next branch checkout is not blocked by a dirty tree.
+        commit_catalog_builder_paths "${git_branch}" "chore: pin catalog builder" "${catalog_cf}"
         popd >/dev/null
         return 0
     fi
@@ -840,8 +1172,8 @@ update_plugin_catalog_node() {
     ensure_node_headers_files "${node_plain}"
     rewrite_catalog_additional_tags "${catalog_cf}" "${node_plain}"
     headers_file=".nvm/releases/node-v${node_plain}-headers.tar.gz"
-    commit_push_paths "${git_branch}" "chore: pin catalog builder to Node v${node_plain}" \
-        .nvmrc "${headers_file}" .nvm/releases/README.adoc "${catalog_cf}"
+    commit_catalog_builder_paths "${git_branch}" "chore: pin catalog builder to Node v${node_plain}" \
+        "${catalog_cf}" .nvmrc "${headers_file}" .nvm/releases/README.adoc
     popd >/dev/null
 }
 
@@ -1008,9 +1340,9 @@ run_analyze() {
 commit_push_rpm_lockfile() {
     local branch="$1"
 
-    if git diff --quiet rpms.lock.yaml 2>/dev/null \
-        && git diff --cached --quiet rpms.lock.yaml 2>/dev/null; then
-        log "RPM lockfile: no changes in rpms.lock.yaml"
+    if git diff --quiet rpms.lock.yaml rpms.in.yaml 2>/dev/null \
+        && git diff --cached --quiet rpms.lock.yaml rpms.in.yaml 2>/dev/null; then
+        log "RPM lockfile: no changes in rpms.lock.yaml or rpms.in.yaml"
         return 0
     fi
 
@@ -1021,7 +1353,7 @@ commit_push_rpm_lockfile() {
         pr_branch=$(find_open_base_images_pr_branch "${branch}" || true)
         if [[ -n "${pr_branch}" ]]; then
             log "RPM lockfile: attaching to open base-images PR branch ${pr_branch}"
-            git stash push -m "rpm-lock" -- rpms.lock.yaml
+            git stash push -m "rpm-lock" -- rpms.lock.yaml rpms.in.yaml
             git checkout "${pr_branch}"
             git stash pop || true
         else
@@ -1029,7 +1361,7 @@ commit_push_rpm_lockfile() {
         fi
     fi
 
-    commit_push_paths "${branch}" "chore: update rpms.lock.yaml [skip-build]" rpms.lock.yaml
+    commit_push_paths "${branch}" "chore: update rpms.lock.yaml [skip-build]" rpms.lock.yaml rpms.in.yaml
 }
 
 while [[ $# -gt 0 ]]; do
