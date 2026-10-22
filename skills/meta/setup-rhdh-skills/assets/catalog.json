@@ -411,7 +411,8 @@
       "requiresSkills": [
         "rhdh-release-schedule",
         "rhdh-forge",
-        "mutation-gate"
+        "mutation-gate",
+        "prose-editing"
       ],
       "requiresExternalSkills": []
     },
